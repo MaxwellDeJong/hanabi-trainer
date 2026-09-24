@@ -1,0 +1,8 @@
+[project]
+name = "hanabi_data"
+version = "0.1.0"
+description = "Hanabi game records -> decision records (docs/representation.md)"
+requires-python = ">=3.9"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
