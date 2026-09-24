@@ -1,0 +1,560 @@
+/* Look of hanab.live's game screen: green felt, Verdana labels in #d8d5ef with a dark glow. */
+
+:root {
+  --label: #d8d5ef;
+  --felt: #1f5a2a;
+  --good: #7ddc8a;
+  --bad: #ff7777;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: #0b2410;
+  color: var(--label);
+  font-family: Verdana, sans-serif;
+  overflow: hidden;
+}
+
+#app {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.stage {
+  position: relative;
+  /* The site draws text on a canvas with "Verdana" and no fallback, so where Verdana isn't installed it
+     shows the browser's default font. No generic fallback here, to look the same. */
+  font-family: Verdana;
+  background-size: cover;
+  overflow: hidden;
+  user-select: none;
+}
+
+.stage > * {
+  position: absolute;
+  box-sizing: border-box;
+}
+
+.label {
+  color: var(--label);
+  text-shadow: 0 0 5px rgba(0, 0, 0, 0.9), 0 0 2px black;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.label.centered {
+  text-align: center;
+}
+
+.label.underlined {
+  border-bottom: 1px solid rgba(216, 213, 239, 0.7);
+}
+
+.action-log {
+  text-align: center;
+  white-space: normal;
+  line-height: 1.12;
+  overflow: hidden;
+}
+
+.clickable {
+  cursor: pointer;
+}
+
+/* Cards */
+
+.card {
+  display: block;
+}
+
+.card.stack-base {
+  opacity: 0.6;
+}
+
+.possibilities {
+  pointer-events: none;
+}
+
+.possibilities .pips {
+  position: absolute;
+  top: 28%;
+  left: 10%;
+  width: 80%;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.possibilities .pip {
+  width: 30%;
+}
+
+.possibilities .ranks {
+  position: absolute;
+  bottom: 6%;
+  width: 100%;
+  text-align: center;
+  color: white;
+  font-weight: bold;
+  text-shadow: 0 0 3px black, 0 0 2px black;
+}
+
+.arrow {
+  pointer-events: none;
+  overflow: visible;
+  z-index: 5;
+  filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.8));
+}
+
+.deck-id {
+  text-align: center;
+  color: white;
+}
+
+.deck-count {
+  text-align: center;
+  color: white;
+  font-weight: bold;
+  text-shadow: 0 0 4px black, 0 0 2px black, 0 0 1px black;
+}
+
+.small {
+  opacity: 0.9;
+}
+
+.trashcan {
+  pointer-events: none;
+}
+
+.strike {
+  pointer-events: none;
+}
+
+.strike-square {
+  border: 1px solid rgba(0, 0, 0, 0.8);
+}
+
+/* Name frames under the hands: ⌊—— name ——⌋ */
+
+.name-frame {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  color: var(--label);
+  text-shadow: 0 0 4px black;
+  line-height: 1;
+}
+
+.name-frame .bracket {
+  flex: 1;
+  height: 50%;
+  align-self: flex-start;
+  border-bottom: 2px solid rgba(216, 213, 239, 0.8);
+}
+
+.name-frame .bracket.left {
+  border-left: 2px solid rgba(216, 213, 239, 0.8);
+}
+
+.name-frame .bracket.right {
+  border-right: 2px solid rgba(216, 213, 239, 0.8);
+}
+
+.name-frame.active .name {
+  color: white;
+  font-weight: bold;
+}
+
+.name-frame.active .bracket {
+  border-color: white;
+}
+
+/* Replay area */
+
+.replay-bar {
+  background: black;
+}
+
+.replay-bar-hit {
+  cursor: pointer;
+}
+
+.shuttle {
+  background: #0000cc;
+  border: 1px solid black;
+  pointer-events: none;
+}
+
+.button {
+  background: rgba(0, 0, 0, 0.55);
+  border: none;
+  color: var(--label);
+  font-family: Verdana;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.button:disabled {
+  cursor: default;
+}
+
+.button:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.75);
+}
+
+.button-icon {
+  height: 55%;
+}
+
+/* Inspect controls (our own addition, where the site has "Enter Hypothetical") */
+
+.controls {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.6em;
+}
+
+.control-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4em;
+}
+
+.control-label {
+  margin-right: 0.3em;
+  text-shadow: 0 0 4px black;
+}
+
+.chip {
+  background: rgba(0, 0, 0, 0.45);
+  color: var(--label);
+  border: 1px solid rgba(216, 213, 239, 0.25);
+  border-radius: 0.4em;
+  padding: 0.3em 0.6em;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.chip:hover {
+  background: rgba(0, 0, 0, 0.7);
+}
+
+.chip.active {
+  background: rgba(216, 213, 239, 0.9);
+  color: #10240f;
+}
+
+.chip.good {
+  color: var(--good);
+}
+
+.chip.bad {
+  color: var(--bad);
+}
+
+/* Clue log */
+
+.clue-entry {
+  display: flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--label);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.clue-entry:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.clue-entry .giver {
+  margin-left: 5%;
+  width: 35%;
+  overflow: hidden;
+}
+
+.clue-entry .target {
+  width: 35%;
+  overflow: hidden;
+}
+
+.clue-entry .value {
+  width: 25%;
+  text-align: center;
+}
+
+.clue-entry.touched {
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.clue-entry.missed {
+  background: rgba(255, 119, 119, 0.4);
+}
+
+/* Tooltip */
+
+.tooltip {
+  position: fixed;
+  z-index: 20;
+  background: rgba(10, 10, 10, 0.92);
+  color: #eee;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+  white-space: pre;
+  pointer-events: none;
+}
+
+/* Overlays */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.panel {
+  position: relative;
+  background: #16331b;
+  border: 1px solid rgba(216, 213, 239, 0.3);
+  border-radius: 10px;
+  padding: 16px 24px;
+  width: min(900px, 92vw);
+  max-height: 86vh;
+  overflow: auto;
+  font-size: 14px;
+}
+
+.panel h2 {
+  margin: 0 0 12px;
+  font-size: 18px;
+}
+
+.panel h3 {
+  font-size: 14px;
+  margin: 16px 0 6px;
+}
+
+.panel .close {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  background: none;
+  border: none;
+  color: var(--label);
+  font-size: 24px;
+  cursor: pointer;
+}
+
+.json {
+  background: rgba(0, 0, 0, 0.35);
+  padding: 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.full-log li {
+  padding: 2px 0;
+}
+
+.full-log li:hover,
+.checks li.clickable:hover {
+  text-decoration: underline;
+}
+
+.checks .bad {
+  color: var(--bad);
+}
+
+.checks .wording {
+  color: #e7d27c;
+}
+
+.hint {
+  opacity: 0.75;
+}
+
+/* Lobby */
+
+.lobby-page {
+  width: min(1000px, 94vw);
+  max-height: 100vh;
+  overflow: auto;
+  padding: 24px;
+  box-sizing: border-box;
+}
+
+.message {
+  font-size: 18px;
+}
+
+table.games {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+table.games th,
+table.games td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(216, 213, 239, 0.15);
+}
+
+table.games tr.clickable:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+td.good {
+  color: var(--good);
+}
+
+td.bad {
+  color: var(--bad);
+}
+
+/* Label mode */
+
+.controls .status {
+  gap: 0.5em;
+  text-shadow: 0 0 4px black;
+}
+
+.status .you {
+  font-weight: bold;
+}
+
+.status .sep {
+  opacity: 0.6;
+}
+
+.status .your-turn {
+  color: #ffe27a;
+  font-weight: bold;
+}
+
+.status .chosen-text {
+  color: #7fe3ff;
+}
+
+.status .alt-text {
+  color: #b9d9e6;
+}
+
+.status .actual-text {
+  color: #ffd2a6;
+}
+
+.status .go-on {
+  opacity: 0.75;
+}
+
+.message-line {
+  min-height: 1.3em;
+  color: #ffb0b0;
+  text-shadow: 0 0 4px black;
+}
+
+/* Whose turn it is */
+
+.turn-box {
+  border: 2px solid rgba(216, 213, 239, 0.55);
+}
+
+.turn-box.yours {
+  border-color: #ffd23f;
+  box-shadow: 0 0 12px 2px rgba(255, 210, 63, 0.6);
+  animation: your-turn 1.6s ease-in-out infinite;
+}
+
+@keyframes your-turn {
+  50% { box-shadow: 0 0 4px 1px rgba(255, 210, 63, 0.25); }
+}
+
+.turn-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+}
+
+.turn-marker.yours {
+  color: #ffd23f;
+}
+
+.marks {
+  pointer-events: none;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2em;
+}
+
+.mark {
+  padding: 0.1em 0.5em;
+  border-radius: 0.4em;
+  font-weight: bold;
+  white-space: nowrap;
+  box-shadow: 0 0 4px black;
+}
+
+.mark.chosen {
+  background: #0aa7d6;
+  color: white;
+}
+
+.mark.alt {
+  background: rgba(10, 167, 214, 0.55);
+  color: white;
+}
+
+.you.same {
+  color: var(--good);
+}
+
+.you.differ {
+  color: #7fe3ff;
+}
+
+.you.skipped {
+  opacity: 0.7;
+}
+
+.action-log .you,
+.full-log .you {
+  margin-left: 0.2em;
+}
+
+.label-section {
+  margin-bottom: 28px;
+}
+
+.name-input {
+  font: inherit;
+  font-size: 14px;
+  padding: 0.3em 0.6em;
+  border-radius: 0.4em;
+  border: 1px solid rgba(216, 213, 239, 0.35);
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--label);
+}
