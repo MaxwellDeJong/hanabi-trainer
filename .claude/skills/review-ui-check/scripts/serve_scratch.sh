@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 # Build the review web app and start serve.py on a fresh, throwaway labels directory.
-#   serve_scratch.sh <scratch-dir> [port]      (default port 8799; 8765 is the user's own server)
+#   serve_scratch.sh [--sound] <scratch-dir> [port]      (default port 8799; 8765 is the user's own server)
+# The app is muted (serve.py --mute) unless --sound is given: only for checking sound logic, which
+# plays every revealed move over the user's speakers.
 # Prints the base URL. Stop it with:  lsof -ti:<port> -sTCP:LISTEN | xargs -r kill
 set -euo pipefail
-scratch=${1:?usage: serve_scratch.sh <scratch-dir> [port]}
+mute=--mute
+if [ "${1:-}" = "--sound" ]; then mute=; shift; fi
+scratch=${1:?usage: serve_scratch.sh [--sound] <scratch-dir> [port]}
 port=${2:-8799}
 repo=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
 
@@ -22,9 +26,9 @@ mkdir -p "$labels"
 npm --prefix "$repo/review" run -s build >/dev/null
 
 log="$scratch/serve-$port.log"
-nohup python3 "$repo/review/server/serve.py" --port "$port" --labels "$labels" >"$log" 2>&1 &
+nohup python3 "$repo/review/server/serve.py" --port "$port" --labels "$labels" $mute >"$log" 2>&1 &
 if ! timeout 30 bash -c "until curl -sf http://127.0.0.1:$port/api/games >/dev/null; do sleep 0.5; done"; then
   echo "server did not come up; see $log" >&2
   exit 1
 fi
-echo "base=http://127.0.0.1:$port labels=$labels log=$log"
+echo "base=http://127.0.0.1:$port labels=$labels log=$log sound=$([ -n "$mute" ] && echo off || echo on)"

@@ -1,6 +1,6 @@
 """Local server for the review tool: the bundle API plus the built web app.
 
-    python3 review/server/serve.py [--port 8765]
+    python3 review/server/serve.py [--port 8765] [--mute]
 
 Serves review/web/dist (build it with `npm run build` in review/) and:
     GET  /api/games                         one summary per bundle in review/build/bundles
@@ -22,6 +22,9 @@ Label mode (docs/review-tool.md §4, §7). Keyed by session. Every call returns 
 
 Responses are gzipped when the client accepts it (JSON and the web app's text files): a label view late in a
 game is ~250 KB raw, ~8 KB gzipped, which matters through a tunnel.
+
+--mute serves the web app with <html data-mute>, which silences its sounds: for automated UI checks
+(.claude/skills/review-ui-check), which would otherwise play every replayed move over the speakers.
 """
 import argparse
 import gzip
@@ -60,6 +63,7 @@ def summary(path):
 
 class Handler(SimpleHTTPRequestHandler):
     store: labels.Store
+    mute = False
 
     def do_GET(self):
         path, _, query = self.path.partition("?")
@@ -87,7 +91,10 @@ class Handler(SimpleHTTPRequestHandler):
         if static.suffix in COMPRESSIBLE and static.is_file():
             # Vite puts a content hash in every name under /assets/, so those never change.
             cache = "public, max-age=31536000, immutable" if path.startswith("/assets/") else "no-cache"
-            return self.send_bytes(static.read_bytes(), self.guess_type(str(static)), cache=cache)
+            data = static.read_bytes()
+            if self.mute and static.name == "index.html":
+                data = data.replace(b"<html", b"<html data-mute", 1)  # read by web/src/sounds.ts
+            return self.send_bytes(data, self.guess_type(str(static)), cache=cache)
         return super().do_GET()
 
     def do_POST(self):
@@ -172,10 +179,12 @@ def main():
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--labels", type=Path, default=labels.LABELS, help="where sessions and labels are stored")
+    ap.add_argument("--mute", action="store_true", help="play no sounds in the web app (for automated UI checks)")
     args = ap.parse_args()
     Handler.store = labels.Store(args.labels, BUNDLES)
+    Handler.mute = args.mute
     server = ThreadingHTTPServer((args.host, args.port), partial(Handler, directory=str(WEB)))
-    print(f"Review tool: http://{args.host}:{args.port}/  ({len(list(BUNDLES.glob('*.json')))} bundles; labels in {args.labels})", flush=True)
+    print(f"Review tool: http://{args.host}:{args.port}/  ({len(list(BUNDLES.glob('*.json')))} bundles; labels in {args.labels}{'; muted' if args.mute else ''})", flush=True)
     server.serve_forever()
 
 

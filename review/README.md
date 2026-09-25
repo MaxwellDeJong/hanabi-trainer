@@ -26,7 +26,7 @@ expires: its moves are deleted and the seat is open again. Left click: play your
 discard / rank clue. Your move applies at once and the game goes on. Shift + click before the move: also
 OK. Space (or →) reveals other players' moves, or set "Turn advance" to Auto in the lobby to reveal them every N
 seconds (mid-game, the "Auto-advance" chip switches it and − / + change the seconds). Tab: hint (the move actually made). Backspace: undo your latest move.
-Each newly revealed move plays the site's sound (hanab.live's own mp3s and rules).
+Each newly revealed move plays the site's sound (hanab.live's own mp3s and rules; `serve.py --mute` turns them off).
 Labels are written to `review/labels/` (`serve.py --labels DIR` to change).
 
 ![Label mode: Bob's turn in a 2-player 6-suit game, with the clue log, stacks and discard pile as on the site](screenshots/label.jpg)
