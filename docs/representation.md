@@ -28,7 +28,8 @@ All four are implemented in the `hanabi_data/` package (§5.1).
 - Label filtering policy (see Q1).
 - The live client: connecting to the websocket, and sending moves (a separate repo, later; see Q11).
 - Screenshot parsing: now only a fallback, since the websocket stream gives the game state as JSON.
-- Downloading (no scraping until approved).
+- Bulk downloading: waits for the server owner's permission. Until then, a hand-picked sample of 10 games
+  (`target_games.txt`) was fetched with `hanabi_data/download.py` into `data/exports/` (§3.6).
 
 ---
 
@@ -39,7 +40,8 @@ All four are implemented in the `hanabi_data/` package (§5.1).
 | Data source | JSON exports from **new.playhanabi.com**, not hanab.live (a separate database with its own game IDs) |
 | Variants | "6 Suits" (6 suits, max score 30) and possibly "No Variant" (5 suits, max score 25). No variants with special rules |
 | Player counts | 2–5. The group has no 6-player games |
-| Game options | (Almost) always **All or Nothing** |
+| Result | **A game is won only at the variant's max score** (30 with 6 suits, 25 with 5). Anything less is a loss, whatever the options. Discarding every copy of a card that's still needed (both copies of a 2–4, or a 5) makes the max score unreachable, so the game is lost at that point |
+| Game options | Most games are **All or Nothing**, and some are **speedrun** games. Neither changes how the group plays or how a result counts, so neither is model input. The engine still reads both, because they change when the game ends and what score the server records (§4). They're also kept for accounting |
 | Time | Games are timed (settings in seconds), but time is **not** part of the representation. Timer options are kept in the stored export only |
 | Players | Several players' histories, deduplicated by game ID |
 | Conventions | One shared set within the group, changing over time. **Not** hardcoded; the model learns them from history |
@@ -47,6 +49,7 @@ All four are implemented in the `hanabi_data/` package (§5.1).
 | Live game state | Read from the game's **websocket stream** as the seated player receives it (§3.4), not from screenshots |
 | Formats | Verbose JSON for storage (this doc); a compact format for the model, derived from it later |
 | Code | The schema, converters, engine and decision records are one Python package, `hanabi_data/`, in this repo (provisional answer to Q9) |
+| Raw data | Exports are cached in `data/exports/export_<id>.json`, unchanged. **Not committed** (`.gitignore`); they can be downloaded again |
 
 ---
 
@@ -173,6 +176,24 @@ consequences:
   it has already seen and infer hidden cards from them (Q12).
 - The seed must never be model input (§3.4).
 
+### 3.6 The 10-game sample (2026-09-25)
+
+Bulk downloading waits for permission (§1), so these 10 games were picked to cover the common cases.
+`hanabi_data/download.py` fetched them politely: one request at a time, ≥5 s apart, cached, stopping at the
+first error. All 10 pass `check` and match hanab.live's reducer (§9).
+
+| Game | Players | Suits | Options besides timers | How it ends (engine) |
+|---|---|---|---|---|
+| 78738, 78742 | 2 | 6 | All or Nothing | Win, 30 |
+| 78663 | 3 | 6 | All or Nothing, speedrun | Win, 30 |
+| 12437 | 4 | 5 | speedrun | Win, 25 |
+| 13398 | 3 | 5 | speedrun | Win, 25 |
+| 78921 | 2 | 6 | All or Nothing | Strikeout (2), turn 11 |
+| 78876 | 3 | 6 | All or Nothing | Strikeout (2), turn 13: misplays on turns 1, 10 and 13. Listed as a double discard in `target_games.txt`, but no card had all its copies discarded |
+| 78919 | 2 | 6 | All or Nothing | All or Nothing fail (8), turn 34: the second T3 discarded |
+| 78852 | 3 | 6 | All or Nothing | All or Nothing fail (8), turn 8: R5 discarded |
+| 78916 | 2 | 6 | All or Nothing | Terminated by a player (4), after turn 8: the end action `{"type": 4, "target": 0, "value": 4}`, the first seen in a real export (a surrender) |
+
 ---
 
 ## 4. Rules the engine implements
@@ -239,6 +260,7 @@ variant other than "No Variant" and "6 Suits", and the options `cardCycle`, `dec
 | `decision.py` | `decisions(record)`, `decision_record(record, turn, viewer=)`, `summarize(record)` |
 | `check.py` | `check_record(record)`: the §9 checks |
 | `record.py` | `load_game(path)` (a GameRecord or a raw export), `player_view(record, seat)` |
+| `download.py` | `download(ids, out_dir)`: polite fetching of `/export/<id>` into a permanent cache (one request at a time, ≥5 s apart by default, a cap per run, stops at the first error). For small hand-picked samples until bulk collection is approved |
 
 ```bash
 python3 -m hanabi_data decision prototype/examples/export_78921.json 4 --pretty   # UI turn 4
@@ -710,9 +732,11 @@ What this means for the design:
    *Checked 2026-09-23:* hanab.live computes pace against the **reachable** max score, not 30 (game
    78822, turn 10: +19, where `score + deck + players − 30` gives +15), and shows nothing once the deck is
    empty. The engine does the same.
-5. **5-suit games.** Include them from the start? Are they also All or Nothing (max score 25)?
-   Test game 78922 (No Variant) had default options, so it wasn't All or Nothing. But it was set up for
-   the test, so it doesn't answer this. We need a real 5-suit game from the group's history.
+5. **5-suit games.** *Answered 2026-09-25:* include them. Whether a game is All or Nothing doesn't matter
+   in practice: a game is won only at the max score (25 with 5 suits), whatever the options (§2). The
+   two 5-suit games in the sample (12437, 13398) are not All or Nothing. Filtering note (Q1): without All
+   or Nothing a game goes on after the max score has become unreachable, so the moves after that point
+   belong to a game that is already lost (`label_effect.lost_critical` marks the move that lost it).
 6. **Deeper knowledge features.** Should `know` also account for what the holder can see in other hands
    (per-holder card counting), or leave that to the model?
 7. **Augmentation.** Suits play identical roles in these variants. Should training shuffle suit letters
