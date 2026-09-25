@@ -11,6 +11,7 @@ export default defineConfig({
       "@hanabi-live/game": `${vendor}/packages/game/src/index.ts`,
       "hanabi-live-ui": `${vendor}/packages/client/src/game/ui`,
       "hanabi-live-img": `${vendor}/public/img`,
+      "hanabi-live-sounds": `${vendor}/public/sounds`,
     },
   },
   // The vendored packages' tsconfig.json files extend monorepo configs we don't check out.

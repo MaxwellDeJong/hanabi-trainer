@@ -18,7 +18,7 @@ from hanabi_data import ENGINE_VERSION, from_export, positions  # noqa: E402
 from hanabi_data import summarize as summarize_game  # noqa: E402
 from hanabi_data.decision import build  # noqa: E402
 from hanabi_data.record import is_game_record  # noqa: E402
-from hanabi_data.rules import COPIES, SUIT_LETTERS  # noqa: E402
+from hanabi_data.rules import COPIES, SUIT_LETTERS, End  # noqa: E402
 
 SCHEMA = "hanabi-review-bundle/v0"
 SUIT_NAMES = {"R": "Red", "Y": "Yellow", "G": "Green", "B": "Blue", "P": "Purple", "T": "Teal"}
@@ -83,6 +83,41 @@ def _is_critical(deck, cid, discarded_before, events, t):
 
 
 # ---------------------------------------------------------------------------------------------------
+# Sound effects
+
+def sound_effects(events, positions_out, end, score, max_score):
+    """The site's sound for each position, i.e. for the action that led to it (hanab.live's
+    getSoundType.ts at c1d970b): the name of a file in public/sounds, or None for the standard sound,
+    turn-us or turn-other, which depends on who is listening (the browser picks it).
+
+    Left out, as on the site with its default settings: the H-group sounds (discarding a clued card,
+    double discards, order chop moves) and the variant sounds (moo, oink, quack), which the engine's
+    variants don't have.
+    """
+    out = [None]  # position 0: the deal
+    touched, blind, misplays = set(), 0, 0  # cards ever clued; blind plays and misplays in a row
+    for ev in events[1:]:
+        k, sound = ev["t"], None
+        sad = positions_out[k]["max_score"] < positions_out[k - 1]["max_score"]
+        if ev["e"] == "clue":
+            touched.update(ev["touched"])
+            blind = misplays = 0
+        elif ev["e"] == "play" and not ev["ok"]:
+            misplays, blind = misplays + 1, 0
+            sound = "turn-fail2" if misplays == 2 else "turn-fail1"
+        else:
+            is_blind = ev["e"] == "play" and ev["card"] not in touched
+            misplays, blind = 0, blind + 1 if is_blind else 0
+            sound = "turn-sad" if sad else f"turn-blind{min(blind, 6)}" if is_blind else None
+        out.append(sound)
+    if end is not None:
+        # The site plays the turn sound and mutes it straight away for this one.
+        out[-1] = ("finished-fail" if end["condition"] != End.NORMAL
+                   else "finished-perfect" if score == max_score else "finished-success")
+    return out
+
+
+# ---------------------------------------------------------------------------------------------------
 # Bundle
 
 def build_bundle(game_doc, oracle=None):
@@ -118,6 +153,7 @@ def build_bundle(game_doc, oracle=None):
         "clues": [{"turn": e["t"], "giver": e["by"], "target": e["to"], "kind": e["kind"], "value": e["value"],
                    "touched": e["touched"], "missed": e["missed"]} for e in events if e["e"] == "clue"],
         "positions": positions_out,
+        "sounds": sound_effects(events, positions_out, engine.end, engine.score, engine.rules.max_score),
         "seat_views": seat_views,
         "decisions": decisions,
     }
@@ -202,12 +238,14 @@ def oracle_checks(bundle, oracle):
 
 
 def summarize(bundle):
-    failed = [c for c in bundle["checks"] if not c["ok"]]
-    errors = [c for c in failed if c["kind"] == "error"]
-    lines = [f"game {bundle['game']['export']['id']}: {len(bundle['checks'])} checks, "
-             f"{len(errors)} errors, {len(failed) - len(errors)} wording differences"]
-    lines += [f"  turn {c['turn']}: {c['check']} [{c['kind']}] {c.get('detail', '')}" for c in failed]
-    return "\n".join(lines), not errors
+    """The check errors, for the console; None if there are none. Wording differences are left out (they
+    stay in the bundle's checks, under Inspect's Checks button)."""
+    errors = [c for c in bundle["checks"] if not c["ok"] and c["kind"] == "error"]
+    if not errors:
+        return None
+    lines = [f"game {bundle['game']['export']['id']}: {len(errors)} check errors"]
+    lines += [f"  turn {c['turn']}: {c['check']} {c.get('detail', '')}" for c in errors]
+    return "\n".join(lines)
 
 
 def main():
@@ -217,15 +255,19 @@ def main():
     ap.add_argument("--no-oracle", action="store_true", help="skip the comparison with hanab.live's reducer")
     args = ap.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
-    all_ok = True
+    built, failed = set(), set()
     for path in args.games:
         game_doc = json.loads(path.read_text())
         bundle = build_bundle(game_doc, None if args.no_oracle else run_oracle(path))
-        (args.out / f"{bundle['game']['export']['id']}.json").write_text(json.dumps(bundle, separators=(",", ":")))
-        text, ok = summarize(bundle)
-        print(text)
-        all_ok &= ok
-    sys.exit(0 if all_ok else 1)
+        game_id = bundle["game"]["export"]["id"]
+        (args.out / f"{game_id}.json").write_text(json.dumps(bundle, separators=(",", ":")))
+        built.add(game_id)
+        text = summarize(bundle)
+        if text is not None:
+            print(text)
+            failed.add(game_id)
+    print(f"{len(built)} bundle{'s' if len(built) != 1 else ''} built, " + (f"{len(failed)} with check errors" if failed else "all checks passed"))
+    sys.exit(1 if failed else 0)
 
 
 if __name__ == "__main__":

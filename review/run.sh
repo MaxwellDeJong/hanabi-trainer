@@ -3,7 +3,8 @@
 #   bash review/run.sh [--port 8765]
 set -euo pipefail
 cd "$(dirname "$0")/.."
-[ -f review/vendor/hanabi-game.mjs ] && [ -d review/node_modules ] || bash review/setup.sh
+[ -f review/vendor/hanabi-game.mjs ] && [ -d review/node_modules ] \
+  && [ -f review/vendor/hanabi-live/public/sounds/turn-us.mp3 ] || bash review/setup.sh
 shopt -s nullglob  # data/exports/ is not committed and may be empty
 python3 review/server/bundle.py examples/export_*.json data/exports/export_*.json \
   || echo "!! some checks failed (see the Checks button)"

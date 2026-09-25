@@ -6,8 +6,12 @@
 
 import { getSession, sessionAction, type Choice, type LabelView, type Obs } from "./api";
 import { cardArt, type CardArt } from "./cards";
-import { closeOverlay, openOverlay } from "./overlay";
+import { celebrate } from "./fireworks";
+import { closeOverlay, openOverlay, overlayOpen } from "./overlay";
+import { getAdvance, setAdvance, stepSeconds } from "./settings";
+import { playTurnSound } from "./sounds";
 import { el, renderTable, type Mark, type Pointer, type TableMode } from "./table";
+import { tip } from "./tips";
 
 const SUIT_LETTERS = "RYGBPT";
 const PLAY_FILL = "#1b7f2e";
@@ -19,7 +23,7 @@ interface State {
   pos: number;
   /** Shift-clicked moves ("equally good") waiting for the main choice at this position. */
   pending: Choice[];
-  /** Hint toggle (Space) for the current position. */
+  /** Hint toggle (Tab) for the current position. */
   hint: boolean;
   message: string;
   /** When the current position was first shown (for `ms_to_choice`). */
@@ -36,6 +40,7 @@ export function labelActive(): boolean {
 
 export function leaveLabel(): void {
   st = null;
+  scheduleAuto();
 }
 
 export async function showLabel(app: HTMLElement, sid: string, turn: number | null): Promise<void> {
@@ -51,6 +56,8 @@ export async function showLabel(app: HTMLElement, sid: string, turn: number | nu
       return;
     }
     st = { sid, data, pos: 0, pending: [], hint: false, message: "", shownAt: performance.now(), busy: false };
+    // As on the site, a sound on first load only at the start of the game.
+    if (data.bundle.turns === 0 && data.session.submitted === null) playSound();
   }
   setPos(turn === null ? st.data.bundle.turns : turn - 1);
 }
@@ -79,8 +86,10 @@ async function act(action: string, body: Record<string, unknown> = {}): Promise<
   const s = st;
   s.busy = true;
   try {
+    const before = s.data.bundle.turns;
     s.data = await sessionAction(s.sid, action, body);
     s.message = "";
+    if (s.data.bundle.turns > before) playSound();
     return s.data;
   } catch (error) {
     flash(error instanceof Error ? error.message : String(error));
@@ -102,7 +111,7 @@ async function advance(): Promise<void> {
     return;
   }
   if (st.data.game_over) {
-    flash("The game is over. Go to the Lobby for a new session.");
+    flash(isSubmitted() ? "Submitted. Go to the Lobby for a new session." : "The game is over: submit your moves.");
     return;
   }
   const data = await act("advance");
@@ -158,8 +167,82 @@ async function toggleHint(): Promise<void> {
 
 /** Undo your latest move and go back to that turn to choose again. */
 async function undo(): Promise<void> {
+  if (isSubmitted()) {
+    flash("This session is submitted and can't be changed.");
+    return;
+  }
   const data = await act("retract");
   if (data?.undone_turn !== undefined) setPos(data.undone_turn - 1);
+}
+
+/** Hand the session in: only once the game is over and every one of your turns has a move. */
+async function submit(): Promise<void> {
+  if (st === null) return;
+  const missing = st.data.own_turns.filter((t) => st!.data.labels[t] === undefined);
+  if (missing.length > 0) {
+    setPos(missing[0]! - 1);
+    flash(`Choose a move at turn ${missing.join(", ")} before submitting.`);
+    return;
+  }
+  const data = await act("submit");
+  if (data?.session.submitted == null || st === null) return;
+  // The reward, then back to the lobby for the next seat (unless the labeller already left).
+  const sid = st.sid;
+  const art = cardArt(data.bundle.game.export.options.variant ?? "No Variant");
+  const turns = data.own_turns.length;
+  // Fireworks in the game's suit colours (a rainbow-like suit's fill is "multi": use its colours).
+  const colors = art.variant.suits.flatMap((x) => (x.fill === "multi" ? [...x.fillColors] : [x.fill]));
+  await celebrate("Submitted!", `${turns} move${turns === 1 ? "" : "s"} labelled. Thank you!`, colors);
+  if (st?.sid === sid) location.hash = "#/";
+}
+
+/** The site's sound for the newest position (a move was just revealed). */
+function playSound(): void {
+  if (st === null) return;
+  const pos = st.data.bundle.turns;
+  playTurnSound(st.data.bundle.sounds?.[pos], actorAt(pos) === st.data.session.seat);
+}
+
+// ---- Auto-advance ------------------------------------------------------------------------------------
+
+let autoTimer: number | undefined;
+/** What the running timer is for: session, position and seconds ("" when none is running). */
+let autoKey = "";
+
+/**
+ * With auto-advance on, reveal the next move after the set time whenever the newest position is another
+ * player's turn. Never while looking back, on your own turn or once the game is over. Called on every
+ * draw; the timer only restarts when the position or the setting changes.
+ */
+function scheduleAuto(): void {
+  const s = st;
+  const a = getAdvance();
+  const waiting = s !== null && a.auto && s.pos === s.data.bundle.turns && !s.data.game_over && !isOwnTurn(s.pos) &&
+    s.data.session.submitted === null;
+  const key = waiting ? `${s.sid}/${s.pos}/${a.seconds}` : "";
+  if (key === autoKey) return;
+  autoKey = key;
+  window.clearTimeout(autoTimer);
+  if (!waiting) return;
+  const fire = (): void => {
+    if (st !== s || autoKey !== key) return;
+    if (s.busy || overlayOpen()) {
+      autoTimer = window.setTimeout(fire, 250);
+      return;
+    }
+    void advance().then(() => {
+      // Still here: the reveal failed (the error is flashed). Try again after the same wait.
+      if (autoKey === key) {
+        autoKey = "";
+        scheduleAuto();
+      }
+    });
+  };
+  autoTimer = window.setTimeout(fire, a.seconds * 1000);
+}
+
+function isSubmitted(): boolean {
+  return st !== null && st.data.session.submitted !== null;
 }
 
 let flashTimer: number | undefined;
@@ -186,12 +269,13 @@ export function labelKey(e: KeyboardEvent): boolean {
   const n = st.data.bundle.game.export.players.length;
   switch (e.key) {
     case "ArrowLeft": setPos(st.pos - 1); break;
-    case "ArrowRight": void advance(); break;
+    case "ArrowRight":
+    case " ": void advance(); break;
     case "[": setPos(st.pos - n); break;
     case "]": setPos(st.pos + n); break;
     case "Home": setPos(0); break;
     case "End": setPos(st.data.bundle.turns); break;
-    case " ": void toggleHint(); break;
+    case "Tab": void toggleHint(); break;
     case "Backspace": void undo(); break;
     default: return false;
   }
@@ -202,6 +286,7 @@ export function labelKey(e: KeyboardEvent): boolean {
 
 function draw(): void {
   if (st === null || root === null) return;
+  scheduleAuto();
   const s = st;
   const { data, pos } = s;
   const bundle = data.bundle;
@@ -216,6 +301,7 @@ function draw(): void {
   const label = data.labels[turn];
   const atFrontier = pos === bundle.turns;
   const actual = data.actual[turn];
+  const submitted = data.session.submitted !== null;
 
   const describe = (c: Choice, p = pos): string => describeChoice(c, obsAt(p), names, art);
 
@@ -251,8 +337,13 @@ function draw(): void {
     controls(box) {
       const status = el("div", "control-row status");
       status.append(el("span", "you", `You are ${names[seat]}`), el("span", "sep", "·"));
-      if (data.game_over && atFrontier) {
-        status.append(el("span", "", "Game over: session complete. Thanks!"));
+      if (submitted && atFrontier) {
+        status.append(el("span", "chosen-text", "Submitted ✓ Thanks! This session is now read only."));
+      } else if (data.game_over && atFrontier) {
+        const missing = data.own_turns.filter((t) => data.labels[t] === undefined).length;
+        status.append(el("span", "your-turn", missing > 0
+          ? `Game over: ${missing} of your turns still need a move`
+          : "Game over: submit your moves when you're happy with them"));
       } else if (own && label === undefined) {
         status.append(el("span", "your-turn", "Your turn"));
       } else if (own) {
@@ -267,16 +358,33 @@ function draw(): void {
       }
 
       const buttons = el("div", "control-row");
-      const button = (text: string, title: string, onClick: () => void, active = false): void => {
-        const b = el("button", active ? "chip active" : "chip", text);
-        b.title = title;
-        // Keep focus off the button, so Space stays the hint key.
+      const button = (text: string, title: string, onClick: () => void, active = false, into: HTMLElement = buttons): void => {
+        const b = tip(el("button", active ? "chip active" : "chip", text), title);
+        // Keep focus off the button, so Space and Tab stay game keys.
         b.addEventListener("mousedown", (e) => e.preventDefault());
         b.addEventListener("click", onClick);
-        buttons.append(b);
+        into.append(b);
       };
-      button("Hint (Space)", "Show the move that was actually made at this turn (recorded as hint used)", () => void toggleHint(), s.hint);
-      button("Undo (⌫)", "Take back your latest move and choose again", () => void undo());
+      button("Hint (Tab)", "Show the move that was actually made at this turn (recorded as hint used)", () => void toggleHint(), s.hint);
+      if (!submitted) button("Undo (⌫)", "Take back your latest move and choose again", () => void undo());
+      if (!submitted && !data.game_over) {
+        // The lobby's "Turn advance" setting, changeable mid-game.
+        const a = getAdvance();
+        button("Auto-advance", a.auto
+          ? `On: the other players' moves are revealed by themselves, one every ${a.seconds} s. Click for manual (Space / →)`
+          : "Off: reveal the other players' moves with Space or →. Click to reveal them by themselves",
+        () => { setAdvance({ auto: !a.auto }); draw(); }, a.auto);
+        const stepper = el("span", a.auto ? "stepper" : "stepper off");
+        const step = (dir: 1 | -1): void => { setAdvance({ seconds: stepSeconds(getAdvance().seconds, dir) }); draw(); };
+        button("−", "Faster: fewer seconds per turn", () => step(-1), false, stepper);
+        stepper.append(tip(el("span", "stepper-value", `${a.seconds} s`), "Seconds each of the other players' turns stays on screen with Auto-advance on"));
+        button("+", "Slower: more seconds per turn", () => step(1), false, stepper);
+        buttons.append(stepper);
+      }
+      if (data.game_over && !submitted) {
+        button("Submit", "Hand in your moves for this seat. The session can't be changed afterwards", () => void submit(), true);
+      }
+      if (submitted && !atFrontier) status.append(el("span", "alt-text", "(read only)"));
 
       const line = el("div", "control-row message-line", s.message);
       box.append(status, buttons, line);
@@ -284,8 +392,12 @@ function draw(): void {
     cardDown(card, holder, e) {
       if (e.button !== 0 && e.button !== 2) return;
       if (e.ctrlKey || e.altKey || e.metaKey) return;
+      if (submitted) {
+        flash("This session is submitted and can't be changed.");
+        return;
+      }
       if (!own) {
-        flash(atFrontier ? `It's ${names[actorAt(pos)]}'s turn: press → to continue.` : "Not your turn.");
+        flash(atFrontier ? `It's ${names[actorAt(pos)]}'s turn: press Space to continue.` : "Not your turn.");
         return;
       }
       const choice = clickChoice(card, holder, e.button === 0);

@@ -17,6 +17,7 @@ import trashcan from "hanabi-live-img/trashcan.png";
 import strikeX from "hanabi-live-img/x.png";
 import type { Bundle, ClueRecord, Slot } from "./api";
 import { CARD_H, CARD_W, cardArt, type CardArt } from "./cards";
+import { hideTooltip, showTooltip } from "./tips";
 
 const LABEL_COLOR = "#d8d5ef";
 const CLUED_COLOR = "orange";
@@ -247,7 +248,7 @@ export function renderTable(root: HTMLElement, view: View, on: Handlers, mode?: 
   const deck: Box = { x: 0.09, y: 0.8, w: 0.075, h: 0.189 };
   if (board.deck > 0) {
     cardImg(art.deckBack(), deck);
-    if (!mode) label(`ID: ${ex.id}`, { x: deck.x, y: deck.y + 0.012, w: deck.w, h: 0.03 }, 0.018, "label deck-id");
+    label(`ID: ${ex.id}`, { x: deck.x, y: deck.y + 0.012, w: deck.w, h: 0.03 }, 0.018, "label deck-id");
     label(String(board.deck), { x: deck.x, y: deck.y + 0.05, w: deck.w, h: 0.09 }, 0.07, "label deck-count");
   } else {
     rect(deck, 0.2, 0.006 * winW);
@@ -546,26 +547,6 @@ function cardInfo(deck: ({ suitIndex: number; rank: number } | null)[], card: nu
     if (slot.status !== null && slot.status.length > 0) lines.push(`status: ${slot.status.join(", ")}`);
   }
   return lines.join("\n");
-}
-
-// ---- Tooltip -----------------------------------------------------------------------------------------
-
-let tooltip: HTMLElement | null = null;
-
-function showTooltip(anchor: HTMLElement, text: string): void {
-  hideTooltip();
-  tooltip = el("div", "tooltip", text);
-  document.body.append(tooltip);
-  const r = anchor.getBoundingClientRect();
-  const t = tooltip.getBoundingClientRect();
-  const left = Math.min(window.innerWidth - t.width - 8, Math.max(8, r.left + r.width / 2 - t.width / 2));
-  const top = r.top - t.height - 8 > 0 ? r.top - t.height - 8 : r.bottom + 8;
-  Object.assign(tooltip.style, { left: px(left), top: px(top) });
-}
-
-function hideTooltip(): void {
-  tooltip?.remove();
-  tooltip = null;
 }
 
 // ---- DOM helpers -------------------------------------------------------------------------------------

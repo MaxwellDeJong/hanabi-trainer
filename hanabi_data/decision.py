@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Iterator, List, Optional
 
 from .engine import ACTIONS, Engine, positions, replay
+from .filters import agreed
 from .rules import COPIES, RANKS, SUIT_LETTERS, End, identity_str
 
 SCHEMA = "hanabi-decision/v0"
@@ -133,7 +134,7 @@ def build(record: dict, engine: Engine, viewer: int, action: Optional[dict], sum
         },
         "label": label,
         "private": private,
-        "meta": _meta(record, engine, viewer, labelled, summary),
+        "meta": _meta(record, engine, viewer, action if labelled else None, summary),
     }
 
 
@@ -174,7 +175,8 @@ def _legal(engine: Engine, rel) -> List[dict]:
     return legal
 
 
-def _meta(record: dict, engine: Engine, viewer: int, labelled: bool, summary: dict) -> dict:
+def _meta(record: dict, engine: Engine, viewer: int, action: Optional[dict], summary: dict) -> dict:
+    labelled = action is not None
     names, n = record["players"], engine.rules.players
     t = engine.turn  # index of the action about to be taken
     end, total = summary["end"], summary["total_turns"]
@@ -196,5 +198,6 @@ def _meta(record: dict, engine: Engine, viewer: int, labelled: bool, summary: di
         "misplay_knowable": a["knowable"] if a else None,
         "misplay_run_to_end": bool(a and run and t >= total - run) if a and end else None,
         "end_misplay_run": run,
+        "filters": agreed(engine, action) if labelled else None,
         "raw_action": raw["actions"][t] if labelled and record["source"]["kind"] == "export" else None,
     }

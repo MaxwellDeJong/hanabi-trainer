@@ -5,6 +5,10 @@
   --felt: #1f5a2a;
   --good: #7ddc8a;
   --bad: #ff7777;
+  /* Seat status (lobby board, admin): always shown with an icon and a word too, never colour alone. */
+  --submitted: #7ddc8a;
+  --active: #e7d27c;
+  --open: rgba(216, 213, 239, 0.45);
 }
 
 html,
@@ -318,6 +322,48 @@ body {
   pointer-events: none;
 }
 
+/* Explanations (lobby, Label mode buttons): wrapped prose; blank lines separate paragraphs. */
+.tooltip.prose {
+  max-width: min(340px, 90vw);
+  white-space: pre-line;
+  line-height: 1.45;
+  font-family: Verdana, sans-serif;
+}
+
+/* A "?" that explains what's next to it on hover */
+.info {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.15em;
+  height: 1.15em;
+  margin-left: 0.45em;
+  border-radius: 50%;
+  border: 1px solid rgba(216, 213, 239, 0.5);
+  font-size: 12px;
+  font-weight: normal;
+  vertical-align: middle;
+  cursor: help;
+  opacity: 0.75;
+}
+
+.info:hover,
+.info:focus-visible {
+  opacity: 1;
+  background: rgba(216, 213, 239, 0.15);
+  outline: none;
+}
+
+h1 .info {
+  font-size: 14px;
+}
+
+th.has-tip {
+  cursor: help;
+  text-decoration: underline dotted rgba(216, 213, 239, 0.45);
+  text-underline-offset: 3px;
+}
+
 /* Overlays */
 
 .overlay {
@@ -395,11 +441,12 @@ body {
 
 /* Lobby */
 
+/* The page scrolls as a whole (scroll bar at the window's right edge); the content stays a centred column. */
 .lobby-page {
-  width: min(1000px, 94vw);
-  max-height: 100vh;
+  align-self: stretch;
+  width: 100%;
   overflow: auto;
-  padding: 24px;
+  padding: 24px max(24px, calc((100% - 1000px) / 2));
   box-sizing: border-box;
 }
 
@@ -557,4 +604,210 @@ td.bad {
   border: 1px solid rgba(216, 213, 239, 0.35);
   background: rgba(0, 0, 0, 0.35);
   color: var(--label);
+}
+
+.seconds-input {
+  width: 5em;
+}
+
+.seconds-input:disabled {
+  opacity: 0.45;
+}
+
+/* Label mode: Auto-advance seconds, − 2 s + */
+.stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15em;
+}
+
+.stepper .chip {
+  padding: 0.3em 0.5em;
+  min-width: 1.8em;
+}
+
+.stepper-value {
+  min-width: 2.8em;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 4px black;
+}
+
+.stepper.off .stepper-value {
+  opacity: 0.55;
+}
+
+/* Lobby: sessions and board */
+
+.lobby-page h2 {
+  font-size: 17px;
+  margin: 22px 0 8px;
+}
+
+.nav {
+  justify-content: flex-end;
+}
+
+td.ready {
+  color: var(--active);
+}
+
+table.games td.seat {
+  white-space: nowrap;
+}
+
+td.seat.submitted {
+  color: var(--submitted);
+}
+
+td.seat.active {
+  color: var(--active);
+}
+
+td.seat.open {
+  color: var(--open);
+}
+
+td.num,
+th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Admin */
+
+.admin a {
+  color: inherit;
+}
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  margin: 8px 0 14px;
+}
+
+.tile {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(216, 213, 239, 0.15);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.tile-label,
+.tile-note {
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+.tile-value {
+  font-size: 24px;
+  margin: 4px 0 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.meter {
+  display: flex;
+  gap: 2px;
+  height: 12px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.meter-seg.submitted,
+.legend.submitted .swatch {
+  background: var(--submitted);
+}
+
+.meter-seg.active,
+.legend.active .swatch {
+  background: var(--active);
+}
+
+.meter-seg.open,
+.legend.open .swatch {
+  background: var(--open);
+}
+
+.meter-legend {
+  margin-top: 6px;
+  gap: 1.2em;
+  font-size: 13px;
+}
+
+.legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+}
+
+.swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+table.coverage td.seat {
+  font-size: 12px;
+}
+
+.seat-who {
+  opacity: 0.8;
+}
+
+/* Submit reward (fireworks.ts) */
+
+.fireworks {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  animation: fireworks-in 0.4s ease-out;
+}
+
+.fireworks canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.fireworks-text {
+  position: absolute;
+  left: 50%;
+  top: 58%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  color: white;
+  text-shadow: 0 0 12px rgba(0, 0, 0, 0.9), 0 0 3px black;
+  pointer-events: none;
+  animation: fireworks-pop 0.6s cubic-bezier(0.2, 1.6, 0.4, 1) both;
+}
+
+.fireworks-title {
+  font-size: clamp(28px, 5vw, 56px);
+  font-weight: bold;
+}
+
+.fireworks-sub {
+  margin-top: 10px;
+  font-size: clamp(14px, 1.6vw, 18px);
+  color: var(--label);
+}
+
+@keyframes fireworks-in {
+  from { background: rgba(0, 0, 0, 0); }
+}
+
+@keyframes fireworks-pop {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.6); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fireworks,
+  .fireworks-text {
+    animation: none;
+  }
 }
