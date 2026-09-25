@@ -16,6 +16,8 @@ import { tip } from "./tips";
 const SUIT_LETTERS = "RYGBPT";
 const PLAY_FILL = "#1b7f2e";
 const DISCARD_FILL = "#8c1c1c";
+/** How long a hand pulses when the recorded move differs from yours (as in style.css). */
+const PULSE_MS = 1600;
 
 interface State {
   sid: string;
@@ -35,6 +37,8 @@ interface State {
    * with the newest position. Looking around (←, Home, the log…) stops it.
    */
   replay: boolean;
+  /** When the game went on to position `pos` live after a move of yours the recorded one differs from. */
+  pulse: { pos: number; start: number } | null;
 }
 
 let st: State | null = null;
@@ -61,7 +65,7 @@ export async function showLabel(app: HTMLElement, sid: string, turn: number | nu
       app.replaceChildren(el("div", "message", `Could not load session: ${String(error)}`));
       return;
     }
-    st = { sid, data, pos: 0, pending: [], hint: false, message: "", shownAt: performance.now(), busy: false, replay: false };
+    st = { sid, data, pos: 0, pending: [], hint: false, message: "", shownAt: performance.now(), busy: false, replay: false, pulse: null };
     // As on the site, a sound on first load only at the start of the game.
     if (data.bundle.turns === 0 && data.session.submitted === null) playSound(0);
   }
@@ -86,7 +90,10 @@ function setPos(pos: number, live = false): void {
     st.hint = false;
     st.shownAt = performance.now();
   }
-  if (live && p === st.pos + 1) playSound(p);
+  if (live && p === st.pos + 1) {
+    playSound(p);
+    if (mismatchAt(p) !== null) st.pulse = { pos: p, start: performance.now() };
+  }
   st.replay = live && st.replay && p < st.data.bundle.turns;
   st.pos = p;
   history.replaceState(null, "", `#/label/${st.sid}/${p + 1}`);
@@ -346,6 +353,15 @@ function draw(): void {
     if (label !== undefined) addMarks(label.choice, "chosen");
     for (const c of [...(label?.also_ok ?? []), ...s.pending]) addMarks(c, "alt");
   }
+  // Your move where the recorded one (just shown) was different: a ghost tag on its cards.
+  const differed = mismatchAt(pos);
+  if (differed !== null) {
+    const text = differed.type === "clue" ? valueName(differed, art) : differed.type === "play" ? "Play" : "Discard";
+    for (const card of cardsOf(differed, obs, seat, n)) {
+      marks.set(card, [...(marks.get(card) ?? []), { text: `You: ${text}`, cls: "ghost" }]);
+    }
+  }
+  const pulseElapsed = s.pulse?.pos === pos ? performance.now() - s.pulse.start : Infinity;
   const pointers: Pointer[] = [];
   if (own && s.hint && actual !== undefined) {
     for (const card of cardsOf(actual, obs, seat, n)) {
@@ -363,6 +379,9 @@ function draw(): void {
     lastIsEnd: data.game_over,
     marks,
     pointers,
+    pulse: differed !== null && pulseElapsed < PULSE_MS
+      ? { seat: differed.type === "clue" ? differed.to_seat : seat, elapsed: pulseElapsed }
+      : undefined,
     controls(box) {
       const status = el("div", "control-row status");
       status.append(el("span", "you", `You are ${names[seat]}`), el("span", "sep", "·"));
@@ -501,6 +520,19 @@ function obsAt(pos: number): Obs {
 function actorAt(pos: number): number {
   const ex = st!.data.bundle.game.export;
   return (pos + Number(ex.options["startingPlayer"] ?? 0)) % ex.players.length;
+}
+
+/**
+ * Your move at the turn just made before position `pos`, if the recorded move there was different (and
+ * not one of your "equally good" moves either); otherwise null.
+ */
+function mismatchAt(pos: number): Choice | null {
+  const s = st!;
+  const lab = s.data.labels[pos];
+  const act = s.data.actual[pos];
+  if (pos === 0 || lab === undefined || act === undefined) return null;
+  if (sameChoice(lab.choice, act) || lab.also_ok.some((c) => sameChoice(c, act))) return null;
+  return lab.choice;
 }
 
 function isOwnTurn(pos: number): boolean {

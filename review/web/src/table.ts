@@ -48,10 +48,13 @@ export interface Handlers {
   showFullLog(): void;
 }
 
-/** A small tag drawn on a card: the chosen move or an "equally good" move. */
+/**
+ * A small tag drawn on a card: the chosen move, an "equally good" move, or (ghost) your move where the
+ * recorded one was different.
+ */
 export interface Mark {
   text: string;
-  cls: "chosen" | "alt";
+  cls: "chosen" | "alt" | "ghost";
 }
 
 /** An arrow like the site's clue arrows, pointing at a card (the hint). */
@@ -75,6 +78,8 @@ export interface TableMode {
   pointers: Pointer[];
   /** Extra text after action log line `k`. */
   logSuffix(k: number): { text: string; cls: string } | null;
+  /** A hand to pulse once (your move differed from the recorded one); `elapsed` ms of it already shown. */
+  pulse?: { seat: number; elapsed: number };
 }
 
 interface Box {
@@ -371,6 +376,12 @@ export function renderTable(root: HTMLElement, view: View, on: Handlers, mode?: 
       const marker = label("▶", { x: hand.x - 0.03, y: y + hand.h / 2 - 0.025, w: 0.02, h: 0.05 }, 0.04, "label turn-marker");
       if (mode && seat === pov) marker.classList.add("yours");
     }
+    if (mode?.pulse?.seat === seat) {
+      // Redraws continue the pulse where it was rather than starting it again.
+      const glow = place(el("div", "mismatch-pulse"), { x: hand.x - 0.008, y: y - 0.012, w: hand.w + 0.016, h: hand.h + 0.012 + 0.045 });
+      glow.style.borderRadius = px(0.01 * winW);
+      glow.style.animationDelay = `${-mode.pulse.elapsed}ms`;
+    }
     // Slot 1 (newest) is on the left; a shorter hand stays centred.
     const used = h.slots.length * cw + Math.max(0, h.slots.length - 1) * cw * cardSpacing;
     const x0 = hand.x + (hand.w - used) / 2;
@@ -404,7 +415,8 @@ export function renderTable(root: HTMLElement, view: View, on: Handlers, mode?: 
   if (mode) {
     stage.addEventListener("contextmenu", (e) => e.preventDefault());
     for (const [card, marks] of mode.marks) {
-      const b = cardBoxes.get(card);
+      // A ghost tag can be on a card that has just gone to the stacks or the discard pile.
+      const b = cardBoxes.get(card) ?? boxes.get(card);
       if (b !== undefined) drawMarks(b, marks);
     }
     for (const p of mode.pointers) {
