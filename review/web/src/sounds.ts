@@ -38,8 +38,11 @@ const FILES: Record<string, string> = {
 /** The site's default volume (its setting is 0–100). */
 const VOLUME = 0.5;
 
+/** `serve.py --mute` marks the page so automated UI checks don't play every move over the speakers. */
+const MUTED = document.documentElement.hasAttribute("data-mute");
+
 // Preload the common ones, as the site does.
-for (const file of [turnUs, turnOther, turnBlind1, turnFail1]) new Audio(file).load();
+if (!MUTED) for (const file of [turnUs, turnOther, turnBlind1, turnFail1]) new Audio(file).load();
 
 /**
  * Play the sound for a newly revealed position. `sound` is the server's choice for it; `ourTurn`
@@ -47,7 +50,7 @@ for (const file of [turnUs, turnOther, turnBlind1, turnFail1]) new Audio(file).l
  */
 export function playTurnSound(sound: string | null | undefined, ourTurn: boolean): void {
   const file = FILES[sound ?? (ourTurn ? "turn-us" : "turn-other")];
-  if (file === undefined) return;
+  if (MUTED || file === undefined) return;
   const audio = new Audio(file);
   audio.volume = VOLUME;
   audio.play().catch(() => {

@@ -6,11 +6,18 @@ Copy it as a starting point for a new check: it shows session setup, picking a m
 actions, clicking cards, pressing keys, timing screenshots around an animation, and asserting on DOM
 state and console errors.
 """
+import subprocess
 import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
+# cdp.py sits next to this file in the skill, but not next to a copy in a scratchpad: then find it
+# from the repo (run the copy with the repo as the working directory).
+_here = Path(__file__).resolve().parent
+if not (_here / "cdp.py").exists():
+    _repo = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True).stdout
+    _here = Path(_repo.strip()) / ".claude/skills/review-ui-check/scripts"
+sys.path.insert(0, str(_here))
 from cdp import Browser, new_session, recorded_actions  # noqa: E402
 
 base, scratch = sys.argv[1], sys.argv[2]

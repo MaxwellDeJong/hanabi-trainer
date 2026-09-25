@@ -22,9 +22,14 @@ available, and `scripts/cdp.py` is a small driver built on them.
    ```
    Use your session scratchpad, not `/tmp` or the repo. Run it again after every edit under
    `review/web/src`, since the server only serves what was last built.
+   **The app is muted by default**: the script passes `serve.py --mute`, which marks the page
+   `<html data-mute>`, and `web/src/sounds.ts` then plays nothing. Otherwise every revealed move
+   would play over the user's speakers. Pass `--sound` first
+   (`serve_scratch.sh --sound <scratch> <port>`) only when checking sound logic (see Pitfalls).
 3. **Write a check script** in the scratchpad. Start from `scripts/example_mismatch.py`, which covers
    session setup, choosing a move from the recorded actions, clicks, keys, animation timing and
-   assertions. Write it with the Write tool, then run it:
+   assertions. Keep its import block: it finds `cdp.py` from the repo when the script isn't in
+   `scripts/`. Write it with the Write tool, then run it from the repo root:
    `python3 <scratchpad>/uicheck/check.py http://127.0.0.1:8799 <scratchpad>/uicheck`.
 4. **Read the screenshots** in `<scratch>/shots/` with the Read tool. A blank or "Loading…" frame
    means the check failed, even if the script printed "ok". Also check `b.errors`, which collects
@@ -91,6 +96,28 @@ errors. For an animation, say that a still screenshot only shows one moment of i
   in-memory state (the undo/replay position) but not `localStorage`.
 - `localStorage` keys: `review.labeller` (lobby name), `review.advance` (Manual/Auto turn advance).
   A fresh profile starts with Manual advance and no labeller name.
+- **Running code before the app loads** (spies, stubs): `b.nav()` reloads the page, so patches made
+  with `b.js()` beforehand are lost. Register them with the raw protocol call before navigating:
+  `b.cdp("Page.addScriptToEvaluateOnNewDocument", source="...")`. They then run before the app on
+  every load.
+
+**Sounds**
+- A screenshot can't show a sound. To check which moves play one, count calls to `play()`:
+  ```python
+  b.cdp("Page.addScriptToEvaluateOnNewDocument", source="""
+      window.__plays = [];
+      const orig = HTMLMediaElement.prototype.play;
+      HTMLMediaElement.prototype.play = function () { window.__plays.push(this.src); return orig.call(this); };
+  """)
+  b.nav(...); b.key(" "); print(b.js("window.__plays"))
+  ```
+- **A muted server always gives an empty list.** Checking sound logic (changes to `sounds.ts`, the
+  sound calls in `label.ts`, or `bundle.py` `sound_effects`) needs `serve_scratch.sh --sound`, which
+  plays over the user's speakers, so keep those runs short and only use them when needed. The server
+  prints `sound=off` or `sound=on`, and `b.js("document.documentElement.hasAttribute('data-mute')")`
+  tells you from the page.
+- When not muted, the app plays a sound on load at turn 0 and one for each revealed move. Moving back
+  (←, Home, a click on the progress bar) is silent.
 
 ## Reference
 
@@ -113,4 +140,6 @@ Label-mode tags are `.mark.chosen`, `.mark.alt` and `.mark.ghost`. Also useful: 
 opens with a clue then a play, so it's handy for Label-mode checks.
 
 **`cdp.Browser` methods:** `nav(url)`, `click_card(holder, index, button, shift)`,
-`click_selector(sel, index)`, `key(k)`, `js(expr)`, `wait_for(expr)`, `text(sel)`, `shot(name)`, `errors`.
+`click_selector(sel, index)`, `key(k)`, `js(expr)`, `wait_for(expr)`, `text(sel)`, `shot(name)`, `errors`,
+and `cdp(method, **params)`: any raw DevTools protocol call (e.g. `Page.addScriptToEvaluateOnNewDocument`),
+returning its result.
