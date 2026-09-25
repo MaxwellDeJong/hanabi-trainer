@@ -11,6 +11,20 @@ bash review/run.sh          # first run also fetches hanab.live's source and ins
 (fetched with `python3 -m hanabi_data.download`), builds the web app and starts the
 server. Hover a card to highlight the clue log (white = touched, red = missed).
 
+**Sharing over a Cloudflare tunnel** (`share.sh`):
+
+```bash
+bash review/share.sh                     # build, serve, and open a public quick tunnel; prints the URL
+bash review/share.sh --labels /tmp/pilot # keep test labels out of review/labels/
+```
+
+`share.sh` runs `run.sh`, waits for the server, then opens a Cloudflare quick tunnel (needs
+`cloudflared`; no account) and prints a `https://<name>.trycloudflare.com` URL to share; Ctrl-C stops
+both. The URL is ephemeral (a new one each run) and unauthenticated, and the admin view and Inspect are
+open to anyone who has it — share only with people you trust. It runs `cloudflared` with `--config
+/dev/null` so a named tunnel's config on the same host (e.g. a production one) can't hijack the routing
+and answer every request with its own 404.
+
 The lobby explains itself in hover tooltips: the "?" beside each heading, dotted column headings and the buttons.
 
 *The screenshots use demo data: players anonymised, labellers made up.*
@@ -43,6 +57,7 @@ JSON, Esc closes overlays.
 | Path | What it is |
 |---|---|
 | `setup.sh` | One-time: sparse checkout of hanab.live at `c1d970b` into `vendor/`, `npm install`, bundle the game package for the oracle |
+| `share.sh` | Build, serve, and open a Cloudflare quick tunnel for sharing; prints the public URL, Ctrl-C stops both |
 | `server/bundle.py` | Builds a game bundle with the engine (`hanabi_data/`) and checks it against the oracle. Exit status is non-zero on any check error |
 | `server/serve.py` | Local server: `/api/games`, `/api/games/<id>/inspect`, the Label session API and the built web app |
 | `server/labels.py` | Label mode: sessions, label events, and the redacted view the browser gets |
