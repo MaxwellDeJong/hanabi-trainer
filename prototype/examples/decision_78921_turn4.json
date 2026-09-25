@@ -1,0 +1,171 @@
+{
+  "schema": "hanabi-decision/v0",
+  "key": {"server": "new.playhanabi.com", "game_id": 78921, "turn": 4},
+  "obs": {
+    "rules": {"players": 2, "suits": 6, "hand_size": 5, "all_or_nothing": true, "max_score": 30},
+    "board": {
+      "turn": 4,
+      "score": 1,
+      "clues": 6,
+      "strikes": 0,
+      "deck": 49,
+      "stacks": {"R": 0, "Y": 1, "G": 0, "B": 0, "P": 0, "T": 0},
+      "discards": [],
+      "pace": 22,
+      "gone": []
+    },
+    "cards": ["Y1", "T1", "P1", "T1", "P2", null, null, null, null, null, "R3"],
+    "hands": [
+      {
+        "seat": 0,
+        "slots": [
+          {
+            "slot": 1,
+            "card": 9,
+            "id": null,
+            "status": null,
+            "drawn_t": 0,
+            "touched_t": [],
+            "know": {"suits": "RYGBPT", "ranks": "2345"}
+          },
+          {
+            "slot": 2,
+            "card": 8,
+            "id": null,
+            "status": null,
+            "drawn_t": 0,
+            "touched_t": [],
+            "know": {"suits": "RYGBPT", "ranks": "2345"}
+          },
+          {
+            "slot": 3,
+            "card": 7,
+            "id": null,
+            "status": null,
+            "drawn_t": 0,
+            "touched_t": [1],
+            "know": {"suits": "RYGBPT", "ranks": "1"}
+          },
+          {
+            "slot": 4,
+            "card": 6,
+            "id": null,
+            "status": null,
+            "drawn_t": 0,
+            "touched_t": [],
+            "know": {"suits": "RYGBPT", "ranks": "2345"}
+          },
+          {
+            "slot": 5,
+            "card": 5,
+            "id": null,
+            "status": null,
+            "drawn_t": 0,
+            "touched_t": [1],
+            "know": {"suits": "RYGBPT", "ranks": "1"}
+          }
+        ]
+      },
+      {
+        "seat": 1,
+        "slots": [
+          {
+            "slot": 1,
+            "card": 10,
+            "id": "R3",
+            "status": [],
+            "drawn_t": 3,
+            "touched_t": [],
+            "know": {"suits": "RYGBPT", "ranks": "12345"}
+          },
+          {
+            "slot": 2,
+            "card": 4,
+            "id": "P2",
+            "status": [],
+            "drawn_t": 0,
+            "touched_t": [],
+            "know": {"suits": "RYGBPT", "ranks": "2345"}
+          },
+          {
+            "slot": 3,
+            "card": 3,
+            "id": "T1",
+            "status": ["playable"],
+            "drawn_t": 0,
+            "touched_t": [2],
+            "know": {"suits": "RYGBPT", "ranks": "1"}
+          },
+          {
+            "slot": 4,
+            "card": 2,
+            "id": "P1",
+            "status": ["playable"],
+            "drawn_t": 0,
+            "touched_t": [2],
+            "know": {"suits": "RYGBPT", "ranks": "1"}
+          },
+          {
+            "slot": 5,
+            "card": 1,
+            "id": "T1",
+            "status": ["playable"],
+            "drawn_t": 0,
+            "touched_t": [2],
+            "know": {"suits": "RYGBPT", "ranks": "1"}
+          }
+        ]
+      }
+    ],
+    "history": [
+      {"t": 0, "e": "deal", "hands": {"1": [4, 3, 2, 1, 0], "0": [9, 8, 7, 6, 5]}},
+      {"t": 1, "by": 1, "e": "clue", "to": 0, "kind": "rank", "value": 1, "touched": [7, 5]},
+      {"t": 2, "by": 0, "e": "clue", "to": 1, "kind": "rank", "value": 1, "touched": [3, 2, 1, 0]},
+      {"t": 3, "by": 1, "e": "play", "card": 0, "slot": 5, "ok": true, "drew": 10}
+    ],
+    "unseen": {
+      "R": [3, 2, 1, 2, 1],
+      "Y": [2, 2, 2, 2, 1],
+      "G": [3, 2, 2, 2, 1],
+      "B": [3, 2, 2, 2, 1],
+      "P": [2, 1, 2, 2, 1],
+      "T": [1, 2, 2, 2, 1]
+    },
+    "legal": [
+      {"type": "play", "slot": 1},
+      {"type": "play", "slot": 2},
+      {"type": "play", "slot": 3},
+      {"type": "play", "slot": 4},
+      {"type": "play", "slot": 5},
+      {"type": "discard", "slot": 1},
+      {"type": "discard", "slot": 2},
+      {"type": "discard", "slot": 3},
+      {"type": "discard", "slot": 4},
+      {"type": "discard", "slot": 5},
+      {"type": "clue", "to": 1, "kind": "color", "value": "R"},
+      {"type": "clue", "to": 1, "kind": "color", "value": "P"},
+      {"type": "clue", "to": 1, "kind": "color", "value": "T"},
+      {"type": "clue", "to": 1, "kind": "rank", "value": 1},
+      {"type": "clue", "to": 1, "kind": "rank", "value": 2},
+      {"type": "clue", "to": 1, "kind": "rank", "value": 3}
+    ]
+  },
+  "label": {"type": "clue", "to": 1, "kind": "color", "value": "P"},
+  "private": {"own_hand": ["G2", "P2", "Y1", "G3", "B1"]},
+  "meta": {
+    "players": ["harikari.live", "pour1out4bga"],
+    "actor": "harikari.live",
+    "datetime": null,
+    "seed": "p2v1s4001",
+    "end_condition": 2,
+    "final_score": 0,
+    "won": false,
+    "total_turns": 11,
+    "turns_to_end": 7,
+    "label_effect": [],
+    "misplay_knowable": false,
+    "misplay_run_to_end": false,
+    "end_misplay_run": 2,
+    "raw_action": {"type": 2, "target": 0, "value": 4}
+  }
+}
