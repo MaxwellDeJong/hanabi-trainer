@@ -1,6 +1,6 @@
 # Review tool: design v0 (draft)
 
-*Status: draft for discussion · 2026-09-23*
+*Status: phases 1–3 and 4a built (§10); last updated 2026-09-25. Progress: `progress.md`*
 
 A browser tool for reviewing recorded games. It has two jobs:
 
@@ -42,13 +42,13 @@ Source: `Hanabi-Live/hanabi-live`, commit `c1d970b` (2026-09-18), the same commi
 |---|---|---|
 | Speedrun click handling | `packages/client/src/game/ui/HanabiCardClickSpeedrun.ts` | Copy its behaviour (§4.2). Discarding at 8 clues is refused and the clue counter flashes. Clues need ≥1 clue token |
 | Default "row" layout | `client/src/game/ui/drawHands.ts:110–172` (the non-Keldon, "Board Game Arena" layout) | Hands are stacked in rows. **Our own hand is the top row**, and the others follow in turn order below it (`j = (i − ourPlayerIndex) mod n`). Screenshots 1–3 use this layout |
-| Card faces and pips | `client/src/game/ui/drawCards.ts`, `drawPip.ts`, `drawPipFunctions.ts` (plain canvas-2D drawing, ~4k lines) | Port these to draw card images once, then use the images in a DOM layout |
+| Card faces and pips | `client/src/game/ui/drawCards.ts`, `drawPip.ts`, `drawPipFunctions.ts` (plain canvas-2D drawing, ~4k lines) | Imported unmodified from `vendor/` to draw card images once; the images are then used in a DOM layout |
 | Clue arrows | `client/src/game/ui/arrows.ts` | Style for the hint overlay and the clue highlights (screenshot 2) |
 | Clue log hover | `client/src/game/ui/ClueEntry.ts:128`, `HanabiCardMouse.ts:44` | Hovering a card highlights clue log entries that **touched** it (white) and entries that **missed** it (red `#ff7777`). Clicking an entry jumps to that turn |
 | Log wording | `packages/game/src/rules/text.ts` (`getClueText`, `getPlayText`, `getDiscardText`, …) | Log lines word-for-word as on the site ("… tells X about two 1s", "… plays Yellow 1 from slot #5") |
 | Replay keys | `docs/features.md` "Keyboard Shortcuts" | ← → one turn, `[` `]` one full round, Home/End |
 | Replay URL | `client/src/game/ui/gameCommands.ts:271` | `https://new.playhanabi.com/replay/<id>#<turn>` for "open on site" (still to confirm on that server) |
-| Official rules engine | `@hanabi-live/game` on npm (v0.0.8, GPL-3.0): `gameReducer` | **An independent reference to check against** (§6.2) |
+| Official rules engine | `packages/game` (GPL-3.0): `gameReducer`, built from the repo at `c1d970b` (npm v0.0.8 is stale) | **An independent reference to check against** (§6.2) |
 
 ---
 
@@ -56,10 +56,10 @@ Source: `Hanabi-Live/hanabi-live`, commit `c1d970b` (2026-09-18), the same commi
 
 | | **Label** | **Inspect** |
 |---|---|---|
-| Who | Labellers | Us, while building the engine |
+| Who | Labellers | Us, while building the engine. Reached from the admin view (§4.4) |
 | View | One seat's view only; that seat's own cards face-down | All hands face-up (like spectating), with a switch to any seat's view |
 | Navigation | Forward only as far as the current turn. Going back to earlier turns works like the in-game replay | Any turn |
-| Extras | Hint toggle, label input | Checks panel, DecisionRecord JSON, differences from the official engine, "open on site" link |
+| Extras | Hint toggle, label input, auto-advance, sounds | Checks panel (incl. differences from the official engine), DecisionRecord / seat view / raw action JSON, "open on site" link |
 | Data sent to the browser | Only what that seat can know (§6.1) | Everything |
 
 ---
@@ -81,7 +81,10 @@ other player's turn ─(Space)─► the real move is applied and logged ─┐
 
 - **The real game always continues.** The labeller's choice is recorded, but the next state comes from the
   export. There are no hypotheticals. When the choice differs from the real move, the log shows the real
-  move with a small "you: …" marker (✓ when they match), so it's clear what happened.
+  move with a small "you: …" marker (✓ when they match, ≈✓ when the real move was one of the "equally
+  good" ones), so it's clear what happened. The position after it also shows a dashed amber "You: …" tag
+  on the cards your move was about, and when the game steps onto it the hand concerned (yours, or the
+  clued player's) pulses red once (1.6 s). Decided 2026-09-25
 - **A click is the move.** As in a live game, clicking a move records it and the game goes on to the next
   turn straight away; cards animate as on the site (drawn from the deck, flying to the stacks or the
   discard pile, hands shifting). Space (or →) applies the next real move on other players' turns; on your
@@ -103,8 +106,12 @@ other player's turn ─(Space)─► the real move is applied and logged ─┐
   that is every label after an undo. After the new move the game goes on from there as it did before:
   the moves already revealed are replayed as live (auto-advance, sounds; your own turns that still have
   a move pass too) until it's back at the newest position, where it carries on as usual. The real move
-  at the undone turn isn't shown there (except with the hint). Looking back (←, Home, the log…) stops
-  the replay.
+  at the undone turn isn't shown there (except with the hint).
+- **Looking back pauses the game.** ←, `[`, Home, the replay bar's rewind buttons or a click in the log
+  show an earlier position silently, with auto-advance paused; with Auto on, the setting is greyed and
+  hatched with "Paused: you went back". Space, →, the forward button or choosing a move resumes from the
+  position shown, as live (sounds, auto-advance), replaying the moves already revealed until it's back at
+  the newest position. Resuming from the lobby opens at the newest position. Decided 2026-09-25
 - **Whose turn it is** is shown by the site's dark box behind the active hand plus a ▶ marker, and a
   pulsing yellow outline and "Your turn" when it's the labeller's.
 - **Time to decide** is recorded for each label. It measures labelling cost and gives a weak confidence
@@ -134,7 +141,7 @@ positive clues on the card face and negative information when hovering. This is 
 | Tab | Hint toggle: show the move that was actually made (arrows, as on the site; P/D for a play or discard) |
 | Backspace | Undo your latest move and go back to that turn |
 | Space or → | Next turn (reveals the next real move) |
-| ← `[` `]` Home End | Look back at earlier turns (never past the current turn) |
+| ← `[` `]` Home End | Look back at earlier turns (never past the current turn); going back pauses the game |
 
 With 6 plain suits, **every legal move is exactly one click on some card**: a legal clue touches at least
 one card, and clicking any card it touches produces exactly that clue. We don't need clue buttons. A click can
@@ -189,10 +196,12 @@ know about their own cards; needs a key other than Tab, which is the hint).
   `obs`, so it tests that the actor's cards are hidden correctly.
 - **Checks panel:** the `representation.md` §9 checks, invariants (total card count preserved; each turn's history
   extends the previous one; label ∈ `legal`; `unseen` agrees with the visible cards), and differences
-  from the official engine (§6.2). Each failure links to its turn and is marked on the timeline.
+  from the official engine (§6.2). Each failure links to its turn. *Not built:* marking failures on the
+  timeline.
 - **Changes since the previous turn:** new cards, touched cards, and changes to stacks and counters.
-  Off-by-one errors in slots are easiest to see here.
-- **Details:** the DecisionRecord JSON, the raw export action, and `meta`.
+  Off-by-one errors in slots are easiest to see here. *Not built as a panel;* after a one-turn step the
+  cards slide to their new places, as on the site.
+- **Details:** the DecisionRecord JSON (with `meta`), the seat's `obs`, and the raw export action (`J`).
 - **Open on site:** `new.playhanabi.com/replay/<id>#<turn>` for side-by-side comparison.
 
 ---
@@ -244,7 +253,8 @@ on every game, not just the ones we look at.
 
 Limits: the reducer doesn't decide when a game ends (hanab.live's server does), and new.playhanabi.com runs
 an older version than `c1d970b` (its log wording differs, `docs/progress.md`). End conditions and the
-server's version are covered by the `listing.score` check (`representation.md` §9).
+server's version are covered by the `listing.score` check (`representation.md` §9). That check is
+skipped for now: `listing` is always `null` until the `/history` page is parsed.
 
 ---
 
@@ -256,6 +266,7 @@ review/
   setup.sh      sparse checkout of hanab.live at c1d970b into vendor/, npm install, oracle bundle
   server/       Python: bundle.py (bundles + checks), labels.py (sessions + label events), serve.py (API + web app)
   labels/       Label data (local): sessions/<id>.json and one <game_id>.jsonl of events per game
+  screenshots/  The screenshots in review/README.md
   web/          TypeScript + Vite, static files. GPL-3.0. Imports hanab.live's card drawing, images and sounds
                 unmodified from vendor/ (aliases in web/vite.config.ts)
   oracle/       Node: hanab.live's own reducer, built from vendor/
@@ -269,7 +280,7 @@ review/
 | `GET /api/sessions?labeller=<name>` | That labeller's sessions (active and submitted) (Label lobby) |
 | `GET /api/board?labeller=<name>` | Every game open for labelling, with each seat's status (§4.4) |
 | `POST /api/sessions` `{labeller, game_id?, seat?}` | Start a session on that (game, seat), refused if it's claimed; or without a game on a random unclaimed seat. Games with check errors are never used. Any session call on an expired session returns 410 |
-| `GET /api/sessions/<sid>` | The label view: the redacted bundle up to the frontier, labels, notes (resume) |
+| `GET /api/sessions/<sid>` | The label view: the redacted bundle up to the frontier, labels, the real moves already public (resume) |
 | `POST /api/sessions/<sid>/advance` | Reveal the next move. Refused on the labeller's own turn until it has a label |
 | `POST /api/sessions/<sid>/labels` `{turn, choice, also_ok, ms_to_choice, advance}` | Append a label event, checked against that turn's `legal`. With `advance`, a label at the frontier also reveals the next move |
 | `POST /api/sessions/<sid>/retract` | Undo the latest label still in force |
@@ -278,6 +289,16 @@ review/
 
 Label mode's API is keyed by **session**, not game. Every session call returns the whole label view. Locally, the server is a small Python process and labels go to
 one JSON-lines file per game. Hosting later means adding sign-in and a database behind the same API.
+
+`serve.py` options: `--port` (8765), `--host`, `--labels DIR` (default `review/labels/`) and `--mute` (serves
+the page as `<html data-mute>`, which silences its sounds, for automated UI checks). Responses of 1 KB or
+more are gzipped when the client accepts it: a label view late in a game is ~250 KB raw, ~8 KB gzipped,
+which matters through a tunnel. Vite's content-hashed `/assets/` are cached as immutable, `index.html` is
+`no-cache`.
+
+UI changes are checked in headless Chrome with the `review-ui-check` skill
+(`.claude/skills/review-ui-check/`): a throwaway muted server with fresh labels, driven over the DevTools
+protocol.
 
 ---
 
@@ -326,8 +347,8 @@ are active), `expired` (when it expired, unsubmitted 24 hours after `started`; i
    setting; they hover to highlight the clue log (§4.2).
 2. **Player names:** anonymised (§4.3).
 3. **Labellers who played the game or deal:** not a concern, not tracked.
-4. **Other players' turns:** one keypress per turn; going back is always possible (§4.1).
-5. **Which games:** random sample of (game, seat) pairs for now.
+4. **Other players' turns:** one keypress per turn, or auto-advance (added 2026-09-25); going back is always possible (§4.1).
+5. **Which games:** random sample of (game, seat) pairs for now; since 2026-09-25 also a seat picked from the board.
 
 ---
 
@@ -335,11 +356,11 @@ are active), `expired` (when it expired, unsubmitted 24 hours after `started`; i
 
 | Phase | Deliverable | Done when |
 |---|---|---|
-| 1 ✅ | Oracle script, and a bundle generator based on the prototype | Games 78921 and 78822 match the official reducer on every turn (done 2026-09-23, `docs/progress.md`) |
+| 1 ✅ | Oracle script, and a bundle generator based on the prototype (now on the engine, `hanabi_data/`) | Games 78921 and 78822 match the official reducer on every turn (done 2026-09-23, `docs/progress.md`) |
 | 2 ✅ | Inspect mode, read-only: row layout, card art, action log, clue log with hover highlight, stacks, discard pile, counters, replay keys, site link | It reproduces screenshots 1–3 (done 2026-09-23, `docs/progress.md`) |
-| 3 ✅ | Label mode: random seat sessions, anonymisation, speedrun controls, hover preview, hint toggle, undo, saving to local files | A full seat of 78921 can be labelled and resumed (done 2026-09-23, `docs/progress.md`) |
-| 4 | Checks panel, game browser | |
-| 4a ✅ | Several labellers: submit vs active sessions, claims, lobby board, admin view | Done 2026-09-25 (`docs/progress.md`) |
+| 3 ✅ | Label mode: random seat sessions, anonymisation, speedrun controls, hint toggle, undo, saving to local files. Revised 2026-09-24 (moves apply at once, card animations; hover preview, skip, throw-away mark and notes removed) and 2026-09-25 (auto-advance, sounds, replay after undo, pause, mismatch cue) | A full seat of 78921 can be labelled and resumed (done 2026-09-23, `docs/progress.md`) |
+| 4 | Checks panel, game browser | Mostly there: Inspect's checks panel (phase 2) and the admin view's list of games (4a). Left: failures marked on the timeline, a "changes since the previous turn" panel (§5), filtering or searching the games list |
+| 4a ✅ | Several labellers: submit vs active sessions, claims, lobby board, 24-hour expiry, admin view; gzip for sharing through a tunnel | Done 2026-09-25 (`docs/progress.md`) |
 | 5 | Later: card notes, empathy, prioritised sampling, hosting (sign-in, database) | |
 
 Screenshot 3 is game **78822** (3 players, 9 actions), saved as `examples/export_78822.json`. The
