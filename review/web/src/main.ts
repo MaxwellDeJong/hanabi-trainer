@@ -95,7 +95,7 @@ function showLobby(): void {
   const page = el("div", "lobby-page");
   const nav = el("div", "control-row nav");
   const admin = tip(el("a", "chip", "Admin view →") as HTMLAnchorElement,
-    "Labelling progress at a glance, what each labeller has done, and Inspect mode for checking games");
+    "Labeling progress at a glance, what each labeler has done, and Inspect mode for checking games");
   admin.href = "#/admin";
   nav.append(admin);
   page.append(nav, labelSection());
@@ -107,14 +107,14 @@ function labelSection(): HTMLElement {
   section.append(heading("h1", "Label",
     "Sit in one seat of a real game, with the players' names hidden, and choose the move you'd make at each of your turns " +
     "(speedrun controls, as on the site). The other players' moves are then revealed as they happened.\n\n" +
-    "When the game is over, submit your moves. Each seat is labelled by one person, so pick an open one: " +
+    "When the game is over, submit your moves. Each seat is labeled by one person, so pick an open one: " +
     "a random one with the button, or a specific one from the board below."));
   const row = el("div", "control-row");
   const name = tip(el("input", "name-input labeller-input"), "Your sessions are kept under this name. It's remembered in this browser");
   name.placeholder = "Your name";
   name.value = loadName();
   const start = tip(el("button", "chip active", "Start a random open seat"),
-    "Start labelling a seat nobody has taken yet, in a game chosen at random");
+    "Start labeling a seat nobody has taken yet, in a game chosen at random");
   const status = el("span", "hint");
   // Without a name, everything that starts a session is greyed out under a hatch (see .no-name in style.css)
   // whose tooltip asks for one; clicking the hatch goes to the name field. The rest of the lobby works as usual.
@@ -126,8 +126,8 @@ function labelSection(): HTMLElement {
     wrap.append(control, hatch);
     return wrap;
   };
-  row.append(el("span", "control-label", "Labeller"), name, needsName(start),
-    el("span", "name-prompt", "← Enter your name to start labelling"), status);
+  row.append(el("span", "control-label", "Labeler"), name, needsName(start),
+    el("span", "name-prompt", "← Enter your name to start labeling"), status);
   const list = el("div");
   section.append(row, advanceRow(), list);
   noName();
@@ -254,8 +254,8 @@ function boardSection(board: BoardGame[], begin: (pick: { game_id: number; seat:
   const count = (st: string): number => seats.filter((x) => x.status === st).length;
   const games = board.filter((g) => g.seats.some((x) => x.available));
   box.append(heading("h2", "Board",
-    "Every game, and who is labelling each of its seats, so that nobody does the same seat twice.\n\n" +
-    "○ take: open, click to start labelling that seat\n✎ in progress: someone's active session\n✓ submitted: done\n\n" +
+    "Every game, and who is labeling each of its seats, so that nobody does the same seat twice.\n\n" +
+    "○ take: open, click to start labeling that seat\n✎ in progress: someone's active session\n✓ submitted: done\n\n" +
     "Your own seats show as buttons, to resume or view them."), el("p", "hint",
     `${seats.length} seats in ${board.length} games: ${count("submitted")} submitted, ${count("active")} in progress, ` +
     `${count("open")} open.`));
@@ -298,12 +298,12 @@ function boardSection(board: BoardGame[], begin: (pick: { game_id: number; seat:
           b.addEventListener("click", () => open(x.session_id!, x.status === "submitted" ? 1 : undefined));
           td.append(b);
         } else if (x.available) {
-          const b = tip(el("button", "chip", "○ take"), `Start labelling ${x.name}'s seat in game ${g.game_id}`);
+          const b = tip(el("button", "chip", "○ take"), `Start labeling ${x.name}'s seat in game ${g.game_id}`);
           b.addEventListener("click", () => void begin({ game_id: g.game_id, seat: k }));
           td.append(needsName(b));
         } else {
           td.textContent = `${SEAT_ICON[x.status]} ${x.labellers.join(", ") || SEAT_WORD[x.status]}`;
-          tip(td, x.status === "submitted" ? `Submitted by ${x.labellers.join(", ")}` : `Being labelled by ${x.labellers.join(", ")}`);
+          tip(td, x.status === "submitted" ? `Submitted by ${x.labellers.join(", ")}` : `Being labeled by ${x.labellers.join(", ")}`);
         }
         tr.append(td);
       });

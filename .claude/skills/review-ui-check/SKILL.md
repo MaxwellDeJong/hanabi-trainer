@@ -1,6 +1,6 @@
 ---
 name: review-ui-check
-description: Launch the review/labelling tool (review/) on a throwaway server and validate a change in the real UI by driving headless Chrome — Label mode clicks and keys, screenshots, DOM and console checks. Use this whenever a change under review/web or review/server should be seen working in the browser, when asked to run, screenshot, smoke-test or "check it in the app", or before reporting a UI change to the review tool as done, even if the user doesn't say "browser".
+description: Launch the review/labeling tool (review/) on a throwaway server and validate a change in the real UI by driving headless Chrome — Label mode clicks and keys, screenshots, DOM and console checks. Use this whenever a change under review/web or review/server should be seen working in the browser, when asked to run, screenshot, smoke-test or "check it in the app", or before reporting a UI change to the review tool as done, even if the user doesn't say "browser".
 ---
 
 # Checking review-tool changes in the browser
@@ -74,7 +74,7 @@ errors. For an animation, say that a still screenshot only shows one moment of i
   in an earlier run. Use a fresh labels directory (`serve_scratch.sh` makes one each time) or a
   different game or seat.
 - **The session id is `view["session"]["session_id"]`**, not `view["id"]`. `GET /api/sessions?labeller=<name>`
-  returns a plain list of rows with `session_id`, newest first. `new_session` uses the labeller
+  returns a plain list of rows with `session_id`, newest first. `new_session` uses the labeler
   `ui-check`.
 - **The store writes lazily**: there's no session file until the first label. An empty labels
   directory right after creating a session is expected.
@@ -105,7 +105,7 @@ errors. For an animation, say that a still screenshot only shows one moment of i
   page, waits for it and then reloads. It raises if the page lands on another route. Use `b.nav()`
   rather than calling `Page.navigate` yourself.
 - `localStorage` keys: `review.labeller` (lobby name), `review.advance` (Manual/Auto turn advance,
-  JSON `{auto, seconds}`). A fresh profile starts with Manual advance and no labeller name. To test
+  JSON `{auto, seconds}`). A fresh profile starts with Manual advance and no labeler name. To test
   Auto, set it before the app loads (see below) with `seconds: 1`:
   `localStorage.setItem('review.advance', JSON.stringify({auto: true, seconds: 1}))`.
 - **Testing auto-advance timing:** poll the turn (`int(b.js("location.hash").rsplit("/", 1)[1])` in
@@ -163,12 +163,12 @@ Label-mode tags are `.mark.chosen`, `.mark.alt` and `.mark.ghost`. Also useful: 
 button is a real `disabled` button.
 
 **Label-mode play state:** `.paused-text` ("Paused: you went back", with a tooltip) appears next to
-the Auto-advance chip while Auto is on and the labeller has gone back. Going back pauses the game;
+the Auto-advance chip while Auto is on and the labeler has gone back. Going back pauses the game;
 Space / → resumes it.
 
 **Games to use:** `GET /api/games` lists the bundles. Game 78921 (2 players, 6 suits) is short and
 opens with a clue then a play, so it's handy for Label-mode checks. Sitting at `startingPlayer`, your
-turns are the odd ones (1, 3, 5…). Sitting at the other seat, they're the even ones. One labeller can
+turns are the odd ones (1, 3, 5…). Sitting at the other seat, they're the even ones. One labeler can
 hold both seats, so one check can create a session for each.
 Setting up an ongoing session: playing your slot 1 is always legal, so `b.click_card(seat, 0)` at each
 of your turns gets you ahead quickly. Whether it matches the recorded move doesn't matter.

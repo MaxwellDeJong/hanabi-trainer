@@ -4,7 +4,7 @@ Tools for building a dataset to train a model that plays **Hanabi** with 2–5 p
 real games played by one group of experienced players. Both the 6-suit ("6 Suits") and 5-suit
 ("No Variant") games are supported; variants with special rules (Rainbow, Brown, …) are not.
 
-*Status: early. The data pipeline and the labelling tool work; the model and its training live elsewhere
+*Status: early. The data pipeline and the labeling tool work; the model and its training live elsewhere
 and haven't started yet.*
 
 ## Goals
@@ -19,7 +19,7 @@ and haven't started yet.*
   format and the same rules engine, so the model sees the same kind of input in both.
 - **Keep labels trustworthy.** Most games under All or Nothing are lost, often through a misplay, but most
   of their moves are still good. So the pipeline marks individual bad moves instead of dropping lost
-  games, and a review tool collects high-quality labels from human labellers.
+  games, and a review tool collects high-quality labels from human labelers.
 
 ## Approach
 
@@ -46,7 +46,7 @@ and haven't started yet.*
 5. **Filter bad labels.** Strict, rules-based filters mark moves that are provably bad under every
    identity the player's information allows. Filters start strict and widen only after their catches are
    reviewed on real games.
-6. **Review and label.** A browser tool that looks and plays like a live game on the site. A labeller sits
+6. **Review and label.** A browser tool that looks and plays like a live game on the site. A labeler sits
    in one seat of a recorded game and picks the best move at each of their turns. Labels feed
    fine-tuning; the full corpus of played moves feeds pretraining.
 
@@ -57,7 +57,7 @@ Out of scope for this repo: the model format, training, and the live client that
 | Path | What it is |
 |---|---|
 | `hanabi_data/` | Python package: converters, rules engine, decision records, label filters, downloader. Python 3.9+, standard library only |
-| `review/` | The review and labelling tool: a local Python server and a TypeScript/Vite web app. See [`review/README.md`](review/README.md) |
+| `review/` | The review and labeling tool: a local Python server and a TypeScript/Vite web app. See [`review/README.md`](review/README.md) |
 | `docs/` | Design documents: [`representation.md`](docs/representation.md) (data format and rules), [`review-tool.md`](docs/review-tool.md), [`label-filtering.md`](docs/label-filtering.md) |
 | `examples/` | Real game exports and live captures used by the tests and docs. See [`examples/README.md`](examples/README.md) |
 | `tests/` | `pytest` suite, including golden decision records and synthetic endgames |

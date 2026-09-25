@@ -222,7 +222,7 @@ async function submit(): Promise<void> {
   const turns = data.own_turns.length;
   // Fireworks in the game's suit colours (a rainbow-like suit's fill is "multi": use its colours).
   const colors = art.variant.suits.flatMap((x) => (x.fill === "multi" ? [...x.fillColors] : [x.fill]));
-  await celebrate("Submitted!", `${turns} move${turns === 1 ? "" : "s"} labelled. Thank you!`, colors);
+  await celebrate("Submitted!", `${turns} move${turns === 1 ? "" : "s"} labeled. Thank you!`, colors);
   if (st?.sid === sid) location.hash = "#/";
 }
 

@@ -166,6 +166,8 @@ def test_admin_report(store):
     assert (people["bob"]["active"], people["bob"]["labels"]) == (1, 0)
     game = next(g for g in r["games"] if g["id"] == GAME)
     assert [x["status"] for x in game["seats"]] == ["submitted", "active", "open"]
+    # A lost All or Nothing game: the score is the cards played, not the site's 0.
+    assert (game["suits"], game["score"], game["max_score"], game["bombs"]) == (6, 3, 30, 1)
 
 
 def test_old_sessions_still_load(store):

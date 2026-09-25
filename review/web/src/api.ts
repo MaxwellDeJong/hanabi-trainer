@@ -230,6 +230,11 @@ export interface AdminReport {
     players: string[];
     variant: string;
     turns: number;
+    suits: number;
+    /** Cards played (the stacks' sum) in every mode, not the site's score. */
+    score: number;
+    max_score: number;
+    bombs: number;
     errors: number;
     seats: {
       seat: number;

@@ -798,16 +798,19 @@ th.num {
 }
 
 .meter-seg.submitted,
+.chart-seg.submitted,
 .legend.submitted .swatch {
   background: var(--submitted);
 }
 
 .meter-seg.active,
+.chart-seg.active,
 .legend.active .swatch {
   background: var(--active);
 }
 
 .meter-seg.open,
+.chart-seg.open,
 .legend.open .swatch {
   background: var(--open);
 }
@@ -836,6 +839,120 @@ table.coverage td.seat {
 
 .seat-who {
   opacity: 0.8;
+}
+
+/* Coverage charts: columns of seats stacked by status, on the tile surface. */
+.charts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.chart {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(216, 213, 239, 0.15);
+  border-radius: 8px;
+  padding: 10px 12px 8px;
+  box-sizing: border-box;
+}
+
+.chart.small {
+  flex: 1 1 170px;
+}
+
+.chart.wide {
+  flex: 3 1 420px;
+}
+
+.chart-title {
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+/* Room on the left for the tick numbers and on top for the tallest column's total. */
+.chart-plot {
+  position: relative;
+  height: 130px;
+  margin: 22px 0 0 26px;
+}
+
+.chart-grid {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: rgba(216, 213, 239, 0.12);
+}
+
+.chart-tick {
+  position: absolute;
+  right: 100%;
+  top: -7px;
+  padding-right: 6px;
+  font-size: 11px;
+  line-height: 14px;
+  opacity: 0.6;
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-cols,
+.chart-labels {
+  display: flex;
+}
+
+.chart-cols {
+  position: absolute;
+  inset: 0;
+}
+
+.chart-slot {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  border-radius: 4px 4px 0 0;
+}
+
+.chart-slot:hover,
+.chart-slot:focus-visible {
+  background: rgba(255, 255, 255, 0.06);
+  outline: none;
+}
+
+.chart-bar {
+  width: min(24px, 70%);
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 2px;
+  border-radius: 4px 4px 0 0;
+  overflow: hidden;
+}
+
+.chart-seg {
+  flex-basis: 0;
+  min-height: 2px;
+}
+
+.chart-cap {
+  font-size: 12px;
+  margin-bottom: 3px;
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-labels {
+  margin: 4px 0 0 26px;
+}
+
+.chart-label {
+  flex: 1 1 0;
+  min-width: 0;
+  text-align: center;
+  white-space: nowrap;
+  font-size: 11px;
+  opacity: 0.75;
 }
 
 /* Submit reward (fireworks.ts) */
