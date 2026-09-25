@@ -110,7 +110,7 @@ async function showLobby(): Promise<void> {
     table.append(row);
   }
   if (games.length === 0) {
-    page.append(el("p", "", "No bundles yet. Run: python3 review/server/bundle.py prototype/examples/export_*.json"));
+    page.append(el("p", "", "No bundles yet. Run: python3 review/server/bundle.py examples/export_*.json"));
   }
   page.append(table);
   app.replaceChildren(page);

@@ -6,7 +6,7 @@ A capture is the sequence of messages one client received, as (command, data) pa
   came before
 - `gameAction`: one more event
 
-`parse_capture` reads the text form used for `prototype/examples/live_*.txt`: one message per line,
+`parse_capture` reads the text form used for `examples/live_*.txt`: one message per line,
 `<command> <json>`.
 
 The record's `view` follows from the data: the seat whose draws are hidden, or None if nothing is

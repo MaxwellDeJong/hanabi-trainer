@@ -1,8 +1,8 @@
 """Command line.
 
-    python3 -m hanabi_data convert-export prototype/examples/export_78921.json > game.json
+    python3 -m hanabi_data convert-export examples/export_78921.json > game.json
     python3 -m hanabi_data convert-live capture.txt [--players a,b] [--options '{"variant": "6 Suits"}']
-    python3 -m hanabi_data decision prototype/examples/export_78921.json 4 --pretty   # UI turn 4
+    python3 -m hanabi_data decision examples/export_78921.json 4 --pretty   # UI turn 4
     python3 -m hanabi_data decisions game.json > decisions.jsonl
     python3 -m hanabi_data check game.json [...]
 

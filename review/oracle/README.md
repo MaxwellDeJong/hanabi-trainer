@@ -7,7 +7,7 @@ with it position by position.
 
 ```bash
 bash review/setup.sh    # once: fetch hanabi-live@c1d970b (sparse) and bundle packages/game with esbuild
-node review/oracle/oracle.mjs prototype/examples/export_78921.json
+node review/oracle/oracle.mjs examples/export_78921.json
 ```
 
 - **Built from source, not npm.** `@hanabi-live/game` 0.0.8 on npm is older than the repo (8.6k diff

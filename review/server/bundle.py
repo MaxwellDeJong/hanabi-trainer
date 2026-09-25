@@ -1,6 +1,6 @@
 """Build a review bundle (docs/review-tool.md §6.1) for one game and check it against hanab.live's reducer.
 
-    python3 review/server/bundle.py prototype/examples/export_78921.json data/exports/export_*.json [--out DIR] [--no-oracle]
+    python3 review/server/bundle.py examples/export_78921.json data/exports/export_*.json [--out DIR] [--no-oracle]
 
 Game state comes from the engine (`hanabi_data`, docs/representation.md). The oracle (review/oracle,
 see its README) replays the same export through hanab.live's own reducer; every position is compared

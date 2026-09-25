@@ -1,7 +1,7 @@
 // Replays exports through hanab.live's own reducer (@hanabi-live/game, built by setup.sh) and prints
 // the public state before every turn as JSON lines, one line per game.
 //
-//   node oracle.mjs ../../prototype/examples/export_78921.json [more exports...]
+//   node oracle.mjs ../../examples/export_78921.json [more exports...]
 //
 // Adapted from hanabi-live packages/client/test/loadGameJSON.ts (GPL-3.0). Differences from it:
 // options come from the export (not defaults), player names are real (so log lines match the site),

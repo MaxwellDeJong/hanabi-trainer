@@ -160,7 +160,7 @@ seat 0 (harikari.live) at four points. After the game it was compared with `/exp
   discard → 1, `strike` + failed `discard` → 0.
 - Replaying the stream, the engine's list of touched cards matches `list` for every clue to the visible
   hand, and the clue count and score match all 9 `status` events.
-- The captures are in `prototype/examples/live_43267_player0_*.txt`. The last one was taken after the
+- The captures are in `examples/live_43267_player0_*.txt`. The last one was taken after the
   game ended, so it is unhidden.
 
 Not yet seen in a capture: a successful `play`, the `init` message, a 3–5 player game, and an All or
@@ -263,7 +263,7 @@ variant other than "No Variant" and "6 Suits", and the options `cardCycle`, `dec
 | `download.py` | `download(ids, out_dir)`: polite fetching of `/export/<id>` into a permanent cache (one request at a time, ≥5 s apart by default, a cap per run, stops at the first error). For small hand-picked samples until bulk collection is approved |
 
 ```bash
-python3 -m hanabi_data decision prototype/examples/export_78921.json 4 --pretty   # UI turn 4
+python3 -m hanabi_data decision examples/export_78921.json 4 --pretty   # UI turn 4
 python3 -m hanabi_data convert-export export.json > game.json
 python3 -m hanabi_data convert-live capture.txt --players a,b
 python3 -m hanabi_data decisions game.json > decisions.jsonl
@@ -439,10 +439,10 @@ touching P2 and P1.
 
 This record was produced by the engine, not written by hand. Every number shown in screenshot 1 matches
 it, and a test (`tests/test_worked_example.py`) keeps this block, the file
-`prototype/examples/decision_78921_turn4.json` and the engine's output identical. To regenerate it:
+`examples/decision_78921_turn4.json` and the engine's output identical. To regenerate it:
 
 ```bash
-python3 -m hanabi_data decision prototype/examples/export_78921.json 4 --pretty
+python3 -m hanabi_data decision examples/export_78921.json 4 --pretty
 ```
 
 ```json
@@ -660,9 +660,10 @@ to exactly the export's events. The same test runs on every synthetic game for e
 `player_view` hiding that seat's draws.
 
 **Tests** (`python3 -m pytest`, 63 tests):
-- **Prototype parity:** every position of the three example games, from every seat, gives the same
-  `obs`, `label`, `private` and `key` as `prototype/replay.py`. The one exception is 78922's
-  `all_or_nothing`, which the prototype hardcoded to `true`.
+- **Golden decisions:** every position of the three example games, from every seat, gives the same
+  `obs`, `label`, `private` and `key` as `tests/data/golden_decisions.jsonl`: the output of the original
+  prototype (checked against screenshots and hanab.live's reducer, since removed), with 78922's
+  `all_or_nothing` corrected to `false`.
 - **Endings the examples don't reach**, on synthetic games in `tests/data/`, found by a random
   full-information search:
   - wins for 2–5 players, 5 and 6 suits, with and without All or Nothing
@@ -764,6 +765,7 @@ What this means for the design:
     check how often seeds repeat within our data once the listing is parsed. `meta.seed` carries it.
 13. **`status` misses dead cards.** `trash` means "already played". A card above a rank whose copies are
     all discarded (e.g. B3 after both B2s are gone) can never be played either, but gets no flag, and
-    `critical` can still be set on it. The engine copies the prototype here to keep the parity tests
-    exact. Should `trash` also cover these cards? That would be `hanabi-decision/v1`. Under All or Nothing
-    such a game ends at once, so it matters mainly for 5-suit games without All or Nothing.
+    `critical` can still be set on it. The engine keeps the original prototype's behaviour here, which
+    `tests/data/golden_decisions.jsonl` freezes. Should `trash` also cover these cards? That would be
+    `hanabi-decision/v1`. Under All or Nothing such a game ends at once, so it matters mainly for 5-suit
+    games without All or Nothing.

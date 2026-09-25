@@ -286,6 +286,6 @@ Session record (`review/labels/sessions/<id>.json`, rewritten on change): `game_
 | 4 | Checks panel, game browser | |
 | 5 | Later: card notes, empathy, prioritised sampling, hosting (sign-in, database) | |
 
-Screenshot 3 is game **78822** (3 players, 9 actions), saved as `prototype/examples/export_78822.json`. The
+Screenshot 3 is game **78822** (3 players, 9 actions), saved as `examples/export_78822.json`. The
 prototype's replay at UI turn 6 matches everything in screenshot 3: counters, pace, stacks, discard pile,
 all three hands and the clued cards.

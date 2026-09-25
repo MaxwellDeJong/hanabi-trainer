@@ -10,7 +10,7 @@ from hanabi_data.engine import replay
 from hanabi_data.rules import COPIES, SUIT_LETTERS
 
 ROOT = Path(__file__).resolve().parents[1]
-EXAMPLES = ROOT / "prototype" / "examples"
+EXAMPLES = ROOT / "examples"
 GAMES = ("78921", "78822", "78922")
 
 
