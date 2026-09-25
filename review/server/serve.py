@@ -19,8 +19,12 @@ Label mode (docs/review-tool.md §4, §7). Keyed by session. Every call returns 
     POST /api/sessions/<sid>/retract        undo the latest label (adds "undone_turn" to the view)
     POST /api/sessions/<sid>/hint           {turn}: reveal the actual move at one of your turns
     POST /api/sessions/<sid>/submit         hand in a finished session; it is read-only from then on
+
+Responses are gzipped when the client accepts it (JSON and the web app's text files): a label view late in a
+game is ~250 KB raw, ~8 KB gzipped, which matters through a tunnel.
 """
 import argparse
+import gzip
 import json
 import re
 from functools import partial
@@ -34,6 +38,8 @@ import labels
 ROOT = Path(__file__).resolve().parents[2]
 BUNDLES = ROOT / "review" / "build" / "bundles"
 WEB = ROOT / "review" / "web" / "dist"
+GZIP_MIN = 1024  # bytes: smaller bodies aren't worth compressing
+COMPRESSIBLE = {".html", ".js", ".css", ".json", ".svg", ".txt"}  # static files; images and mp3s are already compressed
 
 
 def summary(path):
@@ -75,6 +81,13 @@ class Handler(SimpleHTTPRequestHandler):
         if not (WEB / "index.html").exists():
             return self.send_bytes(b"review/web/dist is missing: run `npm run build` in review/", "text/plain",
                                    HTTPStatus.SERVICE_UNAVAILABLE)
+        static = Path(self.translate_path(path))
+        if static.is_dir():
+            static = static / "index.html"
+        if static.suffix in COMPRESSIBLE and static.is_file():
+            # Vite puts a content hash in every name under /assets/, so those never change.
+            cache = "public, max-age=31536000, immutable" if path.startswith("/assets/") else "no-cache"
+            return self.send_bytes(static.read_bytes(), self.guess_type(str(static)), cache=cache)
         return super().do_GET()
 
     def do_POST(self):
@@ -129,13 +142,25 @@ class Handler(SimpleHTTPRequestHandler):
     def send_json(self, obj, status=HTTPStatus.OK):
         self.send_bytes(json.dumps(obj).encode(), "application/json", status)
 
-    def send_bytes(self, data, content_type, status=HTTPStatus.OK):
+    def send_bytes(self, data, content_type, status=HTTPStatus.OK, cache="no-store"):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
+        if len(data) >= GZIP_MIN and self.accepts_gzip():
+            data = gzip.compress(data)
+            self.send_header("Content-Encoding", "gzip")
+        self.send_header("Vary", "Accept-Encoding")
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", cache)
         self.end_headers()
         self.wfile.write(data)
+
+    def accepts_gzip(self):
+        """Whether Accept-Encoding lists gzip (or *) without q=0."""
+        for part in self.headers.get("Accept-Encoding", "").split(","):
+            coding, _, params = part.partition(";")
+            if coding.strip() in ("gzip", "*") and not re.fullmatch(r"\s*q\s*=\s*0(\.0*)?\s*", params):
+                return True
+        return False
 
     def log_message(self, fmt, *args):
         if not self.path.startswith("/assets/"):
