@@ -13,6 +13,10 @@ server. Hover a card to highlight the clue log (white = touched, red = missed).
 
 The lobby explains itself in hover tooltips: the "?" beside each heading, dotted column headings and the buttons.
 
+*The screenshots use demo data: players anonymised, labellers made up.*
+
+![The lobby: your active and submitted sessions, and the board of every game's seats](screenshots/lobby.png)
+
 **Label mode** (lobby → "Label": enter your name, then start a random open seat, take one from the board,
 or resume a session). You get one seat of a game, players anonymised. Each seat goes to one labeller: the
 board shows every game by ID (with a search box) and whether each seat is open, in progress or
@@ -25,9 +29,13 @@ seconds (mid-game, the "Auto-advance" chip switches it and − / + change the se
 Each newly revealed move plays the site's sound (hanab.live's own mp3s and rules).
 Labels are written to `review/labels/` (`serve.py --labels DIR` to change).
 
+![Label mode: Bob's turn in a 2-player 6-suit game, with the clue log, stacks and discard pile as on the site](screenshots/label.jpg)
+
 **Admin view** (`#/admin`, "Admin view →" in the lobby): seats submitted / in progress / open, each
 labeller's contributions, every session, coverage by game with real player names, and the games to open
 in Inspect mode. Local/admin only.
+
+![The admin view: seat coverage, each labeller's contributions and every session](screenshots/admin.png)
 
 **Inspect mode** keys: ← → one turn, `[` `]` one round, Home/End, `O` show/hide the top row's cards, `J`
 JSON, Esc closes overlays.
@@ -38,6 +46,7 @@ JSON, Esc closes overlays.
 | `server/bundle.py` | Builds a game bundle with the engine (`hanabi_data/`) and checks it against the oracle. Exit status is non-zero on any check error |
 | `server/serve.py` | Local server: `/api/games`, `/api/games/<id>/inspect`, the Label session API and the built web app |
 | `server/labels.py` | Label mode: sessions, label events, and the redacted view the browser gets |
+| `screenshots/` | The screenshots in this README |
 | `labels/` | Label data: `sessions/<id>.json` and `<game_id>.jsonl` events. Not generated: keep it |
 | `oracle/` | hanab.live's own reducer, run from Node |
 | `web/` | The viewer (TypeScript + Vite). Uses hanab.live's card-drawing code, images and sounds unmodified from `vendor/` |
