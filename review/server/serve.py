@@ -5,16 +5,20 @@
 Serves review/web/dist (build it with `npm run build` in review/) and:
     GET  /api/games                         one summary per bundle in review/build/bundles
     GET  /api/games/<id>/inspect            the full bundle (Inspect mode; local only)
+    GET  /api/admin                         coverage and per-labeller contributions, with real names (admin only)
 
-Label mode (docs/review-tool.md §4, §7). Keyed by session, never by game, so the browser can't learn
-which game it is. Every call returns the session's label view (labels.label_view):
+Label mode (docs/review-tool.md §4, §7). Keyed by session. Every call returns the session's label view
+(labels.label_view), or 410 once the session has expired (unsubmitted 24 hours after it started):
     GET  /api/sessions?labeller=<name>      the labeller's sessions (lobby)
-    POST /api/sessions        {labeller}    start a session on a random (game, seat)
+    GET  /api/board?labeller=<name>         every open game, with each seat's status (lobby)
+    POST /api/sessions        {labeller, game_id?, seat?}
+                                            start a session on that (game, seat), or a random open one
     GET  /api/sessions/<sid>                the label view
     POST /api/sessions/<sid>/advance        reveal the next move (refused on your turn until you label)
     POST /api/sessions/<sid>/labels         {turn, choice, also_ok, ms_to_choice, advance}
     POST /api/sessions/<sid>/retract        undo the latest label (adds "undone_turn" to the view)
     POST /api/sessions/<sid>/hint           {turn}: reveal the actual move at one of your turns
+    POST /api/sessions/<sid>/submit         hand in a finished session; it is read-only from then on
 """
 import argparse
 import json
@@ -53,8 +57,10 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         path, _, query = self.path.partition("?")
-        if path.startswith("/api/sessions"):
+        if path.startswith("/api/sessions") or path == "/api/board":
             return self.session_api("GET", path, parse_qs(query))
+        if path == "/api/admin":
+            return self.send_json(labels.admin_report(self.store))
         if path == "/api/games":
             games = [summary(p) for p in sorted(BUNDLES.glob("*.json"))]
             return self.send_json(sorted(games, key=lambda g: -g["id"]))
@@ -90,8 +96,10 @@ class Handler(SimpleHTTPRequestHandler):
                     who = args.get("labeller", [None])[0]
                     rows = [labels.session_summary(store, s) for s in store.sessions(who)]
                     return self.send_json(sorted(rows, key=lambda r: r["started"], reverse=True))
-                s = store.start(str(args.get("labeller", "")))
+                s = store.start(str(args.get("labeller", "")), args.get("game_id"), args.get("seat"))
                 return self.send_json(labels.label_view(store, s))
+            if path == "/api/board":
+                return self.send_json(labels.board(store, args.get("labeller", [""])[0].strip()))
             m = re.fullmatch(r"/api/sessions/(\w+)(?:/(\w+))?", path)
             if m is None:
                 return self.send_error(HTTPStatus.NOT_FOUND)
@@ -108,6 +116,8 @@ class Handler(SimpleHTTPRequestHandler):
                 s, extra["undone_turn"] = store.retract(sid)
             elif method == "POST" and action == "hint":
                 s = store.hint(sid, args["turn"])
+            elif method == "POST" and action == "submit":
+                s = store.submit(sid)
             else:
                 return self.send_error(HTTPStatus.NOT_FOUND)
             return self.send_json({**labels.label_view(store, s), **extra})
@@ -138,7 +148,7 @@ def main():
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--labels", type=Path, default=labels.LABELS, help="where sessions and labels are stored")
     args = ap.parse_args()
-    Handler.store = labels.Store(args.labels)
+    Handler.store = labels.Store(args.labels, BUNDLES)
     server = ThreadingHTTPServer((args.host, args.port), partial(Handler, directory=str(WEB)))
     print(f"Review tool: http://{args.host}:{args.port}/  ({len(list(BUNDLES.glob('*.json')))} bundles; labels in {args.labels})", flush=True)
     server.serve_forever()

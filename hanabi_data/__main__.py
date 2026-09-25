@@ -5,6 +5,7 @@
     python3 -m hanabi_data decision examples/export_78921.json 4 --pretty   # UI turn 4
     python3 -m hanabi_data decisions game.json > decisions.jsonl
     python3 -m hanabi_data check game.json [...]
+    python3 -m hanabi_data filters data/exports/*.json [...]           # moves the filters catch
 
 Anything that takes a game accepts a GameRecord or a raw export.
 """
@@ -18,7 +19,8 @@ from pathlib import Path
 from .check import check_record
 from .convert_export import from_export
 from .convert_live import from_live, parse_capture
-from .decision import decision_record, decisions
+from .decision import decision_record, decisions, summarize
+from .filters import BY_NAME, FILTERS, firings
 from .jsonfmt import compact, pretty
 from .record import load_game
 from .rules import InvalidGame, Unsupported
@@ -44,6 +46,8 @@ def main(argv=None) -> int:
     p.add_argument("game", type=Path)
     p = sub.add_parser("check", help="validate GameRecords or exports")
     p.add_argument("games", type=Path, nargs="+")
+    p = sub.add_parser("filters", help="every move the label filters catch, and totals per filter")
+    p.add_argument("games", type=Path, nargs="+", help="duplicate game IDs are read once")
     args = ap.parse_args(argv)
 
     try:
@@ -70,10 +74,37 @@ def main(argv=None) -> int:
                 failed += bool(problems)
                 print(f"{path}: {'ok' if not problems else '; '.join(problems)}")
             return 1 if failed else 0
+        elif args.command == "filters":
+            report_filters(args.games)
     except (InvalidGame, Unsupported, ValueError) as e:
         print(f"error: {type(e).__name__}: {e}", file=sys.stderr)
         return 2
     return 0
+
+
+def report_filters(paths) -> None:
+    """One line per caught move (with the review tool's Inspect link), then totals per filter."""
+    seen, moves, hits = set(), 0, []
+    for path in paths:
+        record = load_game(path)
+        gid = record["source"]["game_id"]
+        if gid in seen:
+            continue
+        seen.add(gid)
+        summary = summarize(record)
+        moves += summary["total_turns"]
+        for hit in firings(record, summary):
+            hits.append(hit)
+            print(f"{hit['game_id']:>6} t{hit['turn']:<3} {','.join(hit['filters'])}: seat {hit['seat']} "
+                  f"{hit['move']}s {hit['card']} (knows {hit['know']}), stacks {hit['stacks']}, "
+                  f"clues {hit['clues']}, strikes {hit['strikes']}, {hit['turns_to_end']} turns to end "
+                  f"(condition {hit['end_condition']}){', in the final misplay run' if hit['end_run'] else ''}"
+                  f"  #/game/{hit['game_id']}/{hit['turn']}?pov={hit['seat']}")
+    print(f"\n{len(seen)} games, {moves} moves")
+    for f in FILTERS:
+        mine = [h for h in hits if f.name in h["filters"]]
+        print(f"{f.name} ({f.status}): {len(mine)} moves in {len({h['game_id'] for h in mine})} games, "
+              f"{sum(h['end_run'] for h in mine)} in a final misplay run")
 
 
 if __name__ == "__main__":

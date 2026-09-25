@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # One-time setup for the review tool:
-#  1. fetch hanab.live at a pinned commit (sparse: the game package, the card-drawing code, UI images)
+#  1. fetch hanab.live at a pinned commit (sparse: the game package, the card-drawing code, UI images, sounds)
 #  2. install npm dependencies
 #  3. bundle the game package for the oracle (vendor/hanabi-game.mjs)
 # The npm release (@hanabi-live/game 0.0.8) is older than the repo, so we build from source.
@@ -19,6 +19,12 @@ PATHS=(
   public/img/replay-forward.png public/img/replay-forward-full.png
   public/img/replay-back-full-disabled.png public/img/replay-back-disabled.png
   public/img/replay-forward-disabled.png public/img/replay-forward-full-disabled.png
+  # The sounds Label mode plays (review/server/bundle.py sound_effects)
+  public/sounds/turn-us.mp3 public/sounds/turn-other.mp3 public/sounds/turn-sad.mp3
+  public/sounds/turn-fail1.mp3 public/sounds/turn-fail2.mp3
+  public/sounds/turn-blind1.mp3 public/sounds/turn-blind2.mp3 public/sounds/turn-blind3.mp3
+  public/sounds/turn-blind4.mp3 public/sounds/turn-blind5.mp3 public/sounds/turn-blind6.mp3
+  public/sounds/finished-success.mp3 public/sounds/finished-fail.mp3 public/sounds/finished-perfect.mp3
 )
 
 if [ ! -d "$SRC/.git" ] || [ "$(git -C "$SRC" rev-parse HEAD)" != "$COMMIT" ] \

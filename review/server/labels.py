@@ -2,20 +2,26 @@
 
 A session is one seat of one game for one labeller. Everything the browser gets goes through
 `label_view`, which sends only what that seat could know by the furthest turn reached (the
-"frontier"), with the players anonymised and nothing that identifies the game.
+"frontier"), with the players anonymised. The game ID is shown: labellers are trusted not to look it up.
+
+A session is *active* from its start until the labeller *submits* it at the end of the game (every one of
+their turns labelled); a submitted session is read-only. A session not submitted within 24 hours of its
+start *expires*: its label events are dropped and it no longer counts anywhere. A (game, seat) with an
+active or submitted session is *claimed*: it is never handed out again, picked or random, so two
+labellers don't label the same seat (§4.4).
 
 Turns are UI turns (1-based) everywhere: turn t is the position before action t, and turn T + 1 is
 the final position. Storage, under review/labels/ by default:
 
-    sessions/<session_id>.json   session state: seat, frontier, hints seen (rewritten)
-    <game_id>.jsonl              append-only events for that game (kinds: label, retract, hint)
+    sessions/<session_id>.json   session state: seat, frontier, hints seen, submitted, expired (rewritten)
+    <game_id>.jsonl              append-only events for that game (kinds: label, retract, hint, submit)
 """
 import json
 import os
 import random
 import secrets
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from bundle import ANON_NAMES
@@ -26,8 +32,9 @@ LABELS = ROOT / "review" / "labels"
 SERVER = "new.playhanabi.com"
 TOOL = "review/0.3"
 SUITS = "RYGBPT"
+EXPIRE_AFTER = timedelta(hours=24)
 
-_lock = threading.Lock()
+_lock = threading.RLock()
 _bundles = {}  # path -> (mtime, bundle)
 
 
@@ -40,11 +47,19 @@ class LabelError(Exception):
 
 
 def _now():
-    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    return _iso(datetime.now(timezone.utc))
 
 
-def load_bundle(game_id):
-    path = BUNDLES / f"{game_id}.json"
+def _iso(t):
+    return t.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _parse(iso):
+    return datetime.fromisoformat(iso.replace("Z", "+00:00"))
+
+
+def load_bundle(game_id, bundles=BUNDLES):
+    path = Path(bundles) / f"{int(game_id)}.json"
     if not path.exists():
         raise LabelError(f"no bundle for game {game_id}", 404)
     mtime = path.stat().st_mtime
@@ -56,9 +71,28 @@ def load_bundle(game_id):
 
 
 class Store:
-    def __init__(self, root=LABELS):
+    def __init__(self, root=LABELS, bundles=BUNDLES, expire_after=EXPIRE_AFTER):
         self.root = Path(root)
+        self.bundles = Path(bundles)
+        self.expire_after = expire_after
         (self.root / "sessions").mkdir(parents=True, exist_ok=True)
+
+    # ---- Games ------------------------------------------------------------------------------------
+
+    def bundle(self, game_id):
+        return load_bundle(game_id, self.bundles)
+
+    def game_ids(self):
+        return sorted(int(p.stem) for p in self.bundles.glob("*.json"))
+
+    def labelable(self):
+        """(game_id, bundle) for every game open for labelling: never one the engine gets wrong."""
+        out = []
+        for game_id in self.game_ids():
+            b = self.bundle(game_id)
+            if check_errors(b) == 0:
+                out.append((game_id, b))
+        return out
 
     # ---- Sessions ---------------------------------------------------------------------------------
 
@@ -71,7 +105,11 @@ class Store:
         path = self._session_path(sid)
         if not path.exists():
             raise LabelError("no such session", 404)
-        return json.loads(path.read_text())
+        s = json.loads(path.read_text())
+        if self._expire(s):
+            raise LabelError("this session expired 24 hours after it started: its moves were dropped and the seat "
+                             "is open again", 410)
+        return s
 
     def _save(self, s):
         path = self._session_path(s["session_id"])
@@ -81,31 +119,74 @@ class Store:
         os.replace(tmp, path)
 
     def sessions(self, labeller=None):
+        """Every session still in force (active or submitted): expired ones are left out."""
         out = [json.loads(p.read_text()) for p in sorted((self.root / "sessions").glob("*.json"))]
-        return [s for s in out if labeller is None or s["labeller"] == labeller]
+        return [s for s in out if not self._expire(s) and (labeller is None or s["labeller"] == labeller)]
 
-    def start(self, labeller):
-        """A new session on a random (game, seat). A labeller gets at most one seat per game (§4.3)."""
+    def expires(self, s):
+        return _iso(_parse(s["started"]) + self.expire_after)
+
+    def _expire(self, s):
+        """Whether the session has expired. The first time it's found unsubmitted past its deadline, its
+        events are dropped and it's marked `expired`, which frees its seat."""
+        if s.get("expired"):
+            return True
+        if s.get("submitted") or self.expires(s) > _now():
+            return False
+        with _lock:
+            path = self._events_path(s["game_id"])
+            if path.exists():
+                kept = [e for e in self.game_events(s["game_id"]) if e["session_id"] != s["session_id"]]
+                tmp = path.with_suffix(".tmp")
+                tmp.write_text("".join(json.dumps(e) + "\n" for e in kept))
+                os.replace(tmp, path)
+            s["expired"] = _now()
+            self._save(s)
+        return True
+
+    def editable(self, sid):
+        """The session, if it may still change: a submitted session is read-only."""
+        s = self.session(sid)
+        if s.get("submitted"):
+            raise LabelError("this session has been submitted", 409)
+        return s
+
+    def claims(self, sessions=None):
+        """(game_id, seat) -> the sessions on it (active or submitted), any labeller."""
+        out = {}
+        for s in self.sessions() if sessions is None else sessions:
+            out.setdefault((s["game_id"], s["seat"]), []).append(s)
+        return out
+
+    def start(self, labeller, game_id=None, seat=None):
+        """A new session: the given (game, seat) or, without a game, a random unclaimed one.
+        A claimed seat is never handed out again (§4.4)."""
         labeller = labeller.strip()
         if not labeller:
             raise LabelError("labeller name is required")
         with _lock:
-            done = {s["game_id"] for s in self.sessions(labeller)}
-            candidates = []
-            for path in sorted(BUNDLES.glob("*.json")):
-                game_id = int(path.stem)
-                if game_id in done:
-                    continue
-                b = load_bundle(game_id)
-                if any(not c["ok"] and c["kind"] == "error" for c in b["checks"]):
-                    continue  # never label a game the engine gets wrong
-                candidates += [(game_id, seat) for seat in range(len(b["game"]["export"]["players"]))]
-            if not candidates:
-                raise LabelError("no games left to label for this labeller", 409)
-            game_id, seat = random.choice(candidates)
+            claimed = self.claims()
+            if game_id is None:
+                candidates = [(game_id, k) for game_id, b in self.labelable()
+                              for k in range(_players(b)) if (game_id, k) not in claimed]
+                if not candidates:
+                    raise LabelError("no open seats left: every seat is being labelled or submitted", 409)
+                game_id, seat = random.choice(candidates)
+                chosen_by = "random"
+            else:
+                if not isinstance(game_id, int) or isinstance(game_id, bool):
+                    raise LabelError("no such game", 404)
+                b = self.bundle(game_id)
+                if check_errors(b):
+                    raise LabelError("this game is not open for labelling", 409)
+                if not isinstance(seat, int) or not 0 <= seat < _players(b):
+                    raise LabelError("no such seat")
+                if (game_id, seat) in claimed:
+                    raise LabelError("someone else has already taken this seat", 409)
+                chosen_by = "picked"
             s = {"session_id": secrets.token_hex(6), "game_id": game_id, "seat": seat, "labeller": labeller,
-                 "chosen_by": "random", "started": _now(), "ended": None, "frontier": 1,
-                 "frontier_at": _now(), "hints": [], "tool": TOOL}
+                 "chosen_by": chosen_by, "started": _now(), "ended": None, "submitted": None, "frontier": 1,
+                 "frontier_at": _now(), "hints": [], "expired": None, "tool": TOOL}
             self._save(s)
             return s
 
@@ -114,12 +195,15 @@ class Store:
     def _events_path(self, game_id):
         return self.root / f"{int(game_id)}.jsonl"
 
-    def events(self, s):
-        path = self._events_path(s["game_id"])
+    def game_events(self, game_id):
+        path = self._events_path(game_id)
         if not path.exists():
             return []
         with path.open() as f:
-            return [e for e in map(json.loads, f) if e["session_id"] == s["session_id"]]
+            return [json.loads(line) for line in f if line.strip()]
+
+    def events(self, s):
+        return [e for e in self.game_events(s["game_id"]) if e["session_id"] == s["session_id"]]
 
     def _append(self, s, kind, **fields):
         ev = {"kind": kind, "event_id": secrets.token_hex(8), "server": SERVER, "game_id": s["game_id"],
@@ -148,8 +232,8 @@ class Store:
 
     def advance(self, sid):
         with _lock:
-            s = self.session(sid)
-            self._advance(s, load_bundle(s["game_id"]))
+            s = self.editable(sid)
+            self._advance(s, self.bundle(s["game_id"]))
             return s
 
     def _advance(self, s, b):
@@ -168,8 +252,8 @@ class Store:
         """Record the labeller's move for `turn`, checked against that turn's legal moves. With `advance`,
         a label at the frontier also reveals the next move (the live game goes on as soon as you move)."""
         with _lock:
-            s = self.session(sid)
-            b = load_bundle(s["game_id"])
+            s = self.editable(sid)
+            b = self.bundle(s["game_id"])
             turn = self._own_turn(s, b, turn)
             obs = b["seat_views"][s["seat"]][turn - 1]
             n = len(b["game"]["export"]["players"])
@@ -193,7 +277,7 @@ class Store:
     def retract(self, sid):
         """Undo the latest label still in force. Returns (session, turn it was at)."""
         with _lock:
-            s = self.session(sid)
+            s = self.editable(sid)
             labels = self.current_labels(self.events(s))
             if not labels:
                 raise LabelError("nothing to undo", 409)
@@ -203,12 +287,29 @@ class Store:
 
     def hint(self, sid, turn):
         with _lock:
-            s = self.session(sid)
-            turn = self._own_turn(s, load_bundle(s["game_id"]), turn)
+            s = self.editable(sid)
+            turn = self._own_turn(s, self.bundle(s["game_id"]), turn)
             if turn not in s["hints"]:
                 s["hints"].append(turn)
                 self._save(s)
                 self._append(s, "hint", turn=turn, before_frontier=turn < s["frontier"])
+            return s
+
+    def submit(self, sid):
+        """Hand in a finished session: the game played to the end and a move chosen at every own turn.
+        The session is read-only from then on."""
+        with _lock:
+            s = self.editable(sid)
+            b = self.bundle(s["game_id"])
+            if s["frontier"] <= b["turns"]:
+                raise LabelError("play the game to the end before submitting", 409)
+            labels = self.current_labels(self.events(s))
+            missing = [t for t in own_turns(b, s["seat"]) if t not in labels]
+            if missing:
+                raise LabelError(f"choose a move at turn {', '.join(map(str, missing))} before submitting", 409)
+            s["submitted"] = _now()
+            self._save(s)
+            self._append(s, "submit", labels=len(labels))
             return s
 
     @staticmethod
@@ -223,6 +324,35 @@ class Store:
         if turn > b["turns"] or _actor(b, turn) != s["seat"]:
             raise LabelError(f"turn {turn} is not your turn")
         return turn
+
+
+def check_errors(b):
+    return sum(1 for c in b["checks"] if not c["ok"] and c["kind"] == "error")
+
+
+def _players(b):
+    return len(b["game"]["export"]["players"])
+
+
+def own_turns(b, seat, upto=None):
+    """The seat's turns, up to `upto` (default: the whole game)."""
+    last = b["turns"] if upto is None else min(upto, b["turns"])
+    return [t for t in range(1, last + 1) if _actor(b, t) == seat]
+
+
+def status(s):
+    return "submitted" if s.get("submitted") else "active"
+
+
+def seat_status(sessions):
+    """A (game, seat)'s status from the sessions on it: submitted > active > open."""
+    kinds = {status(s) for s in sessions}
+    return "submitted" if "submitted" in kinds else "active" if kinds else "open"
+
+
+def last_active(s, events):
+    """The session's latest activity (ISO timestamps in one format compare as strings)."""
+    return max([s["started"], s["frontier_at"], s.get("submitted") or ""] + [e["at"] for e in events])
 
 
 def _actor(b, turn):
@@ -260,7 +390,7 @@ def _public_obs(obs):
 
 def label_view(store, s):
     """Everything the browser gets in Label mode: a bundle cut off at the frontier, redacted (§4.3, §6.1)."""
-    b = load_bundle(s["game_id"])
+    b = store.bundle(s["game_id"])
     ex = b["game"]["export"]
     n, seat, frontier = len(ex["players"]), s["seat"], s["frontier"]
     views = b["seat_views"][seat][:frontier]
@@ -271,22 +401,25 @@ def label_view(store, s):
         "schema": b["schema"],
         "engine": b["engine"],
         "game": {"export": {
-            "id": 0, "players": ANON_NAMES[:n], "deck": deck,
+            "id": s["game_id"], "players": ANON_NAMES[:n], "deck": deck,
             "actions": [],
             "options": {k: options[k] for k in ("variant", "startingPlayer", "allOrNothing") if k in options}}},
         "turns": frontier - 1,
         "log": b["log_anon"][:frontier],
         "clues": [c for c in b["clues"] if c["turn"] < frontier],
         "positions": [{**p, "hands": []} for p in b["positions"][:frontier]],
+        # .get: bundles built before sounds were added (2026-09-25) lack them; the browser then plays the standard one.
+        "sounds": b.get("sounds", [])[:frontier],
         "seat_views": [[_public_obs(o) for o in views] if k == seat else [] for k in range(n)],
         "decisions": [],
         "checks": [],
     }
     events = store.events(s)
-    own = [t for t in range(1, min(frontier, b["turns"]) + 1) if _actor(b, t) == seat]
+    own = own_turns(b, seat, frontier)
     labels = store.current_labels(events)
     return {
-        "session": {k: s[k] for k in ("session_id", "seat", "labeller", "frontier", "ended", "hints")},
+        "session": {**{k: s[k] for k in ("session_id", "seat", "labeller", "frontier", "ended", "hints")},
+                    "submitted": s.get("submitted"), "game_id": s["game_id"]},
         "game_over": frontier > b["turns"],
         "own_turns": own,
         # .get: events written before `after_reveal` replaced `changed_after_reveal` (2026-09-24) lack it.
@@ -298,11 +431,116 @@ def label_view(store, s):
     }
 
 
-def session_summary(store, s):
-    """What the lobby shows for a session. No game ID: the labeller mustn't be able to look the game up."""
-    b = load_bundle(s["game_id"])
+def session_summary(store, s, events=None):
+    """What the lobby shows for a session."""
+    b = store.bundle(s["game_id"])
     ex = b["game"]["export"]
-    labels = store.current_labels(store.events(s))
-    return {"session_id": s["session_id"], "labeller": s["labeller"], "started": s["started"], "ended": s["ended"],
+    events = store.events(s) if events is None else events
+    labels = store.current_labels(events)
+    own = own_turns(b, s["seat"])
+    return {"session_id": s["session_id"], "game_id": s["game_id"], "labeller": s["labeller"],
+            "status": status(s), "started": s["started"], "expires": store.expires(s), "submitted": s.get("submitted"),
+            "last_active": last_active(s, events), "game_over": s["frontier"] > b["turns"],
             "players": len(ex["players"]), "variant": ex.get("options", {}).get("variant", "No Variant"),
-            "you": ANON_NAMES[s["seat"]], "turn": s["frontier"], "labels": len(labels)}
+            "you": ANON_NAMES[s["seat"]], "turn": s["frontier"], "labels": len(labels), "own_turns": len(own)}
+
+
+def board(store, labeller):
+    """Every game open for labelling and who is on each seat, for the lobby (§4.4), newest game first."""
+    sessions = store.sessions()
+    claims = store.claims(sessions)
+    rows = []
+    for game_id, b in store.labelable():
+        seats = []
+        for k in range(_players(b)):
+            on = sorted(claims.get((game_id, k), []), key=lambda s: s["started"])
+            yours = next((s for s in on if s["labeller"] == labeller), None)
+            seats.append({"name": ANON_NAMES[k], "status": seat_status(on), "labellers": [s["labeller"] for s in on],
+                          "session_id": yours["session_id"] if yours else None,
+                          "available": not on})
+        rows.append({"game_id": game_id, "players": len(seats),
+                     "variant": b["game"]["export"].get("options", {}).get("variant", "No Variant"), "seats": seats})
+    return sorted(rows, key=lambda r: -r["game_id"])
+
+
+def admin_report(store):
+    """Coverage and contributions at a glance, with real player names (admin only)."""
+    sessions = store.sessions()
+    claims = store.claims(sessions)
+    events = {}  # session_id -> its events
+    for game_id in {s["game_id"] for s in sessions}:
+        for e in store.game_events(game_id):
+            events.setdefault(e["session_id"], []).append(e)
+    rows = {}  # session_id -> admin session row
+    for s in sessions:
+        ev = events.get(s["session_id"], [])
+        labels = store.current_labels(ev)
+        b = store.bundle(s["game_id"])
+        rows[s["session_id"]] = {
+            **session_summary(store, s, ev), "seat": s["seat"],
+            "chosen_by": s.get("chosen_by"), "turns": b["turns"], "hints": len(s["hints"]),
+            "hint_labels": sum(1 for e in labels.values() if e.get("hint_used")),
+            "after_reveal": sum(1 for e in labels.values() if e.get("after_reveal")),
+            "ms": [e["ms_to_choice"] for e in labels.values() if isinstance(e.get("ms_to_choice"), (int, float))]}
+
+    games, totals = [], {"games": 0, "labelable_games": 0, "seats": 0, "open": 0, "active": 0, "submitted": 0,
+                         "own_turns": 0, "own_turns_submitted": 0}
+    for game_id in store.game_ids():
+        b = store.bundle(game_id)
+        ex = b["game"]["export"]
+        errors = check_errors(b)
+        totals["games"] += 1
+        seats = []
+        for k in range(_players(b)):
+            on = sorted(claims.get((game_id, k), []), key=lambda s: s["started"])
+            st, n_own = seat_status(on), len(own_turns(b, k))
+            seats.append({"seat": k, "player": ex["players"][k], "anon": ANON_NAMES[k], "status": st,
+                          "own_turns": n_own,
+                          "sessions": [{key: rows[s["session_id"]][key] for key in
+                                        ("session_id", "labeller", "status", "turn", "labels", "last_active")}
+                                       for s in on]})
+            if not errors:
+                totals["seats"] += 1
+                totals[st] += 1
+                totals["own_turns"] += n_own
+                totals["own_turns_submitted"] += n_own if st == "submitted" else 0
+        totals["labelable_games"] += not errors
+        games.append({"id": game_id, "players": ex["players"],
+                      "variant": ex.get("options", {}).get("variant", "No Variant"), "turns": b["turns"],
+                      "errors": errors, "seats": seats})
+
+    people = {}
+    for r in rows.values():
+        p = people.setdefault(r["labeller"], {"labeller": r["labeller"], "active": 0, "submitted": 0, "labels": 0,
+                                              "labels_submitted": 0, "hint_labels": 0, "after_reveal": 0, "ms": [],
+                                              "first": r["started"], "last_active": r["last_active"]})
+        p[r["status"]] += 1
+        p["labels"] += r["labels"]
+        p["labels_submitted"] += r["labels"] if r["status"] == "submitted" else 0
+        p["hint_labels"] += r["hint_labels"]
+        p["after_reveal"] += r["after_reveal"]
+        p["ms"] += r["ms"]
+        p["first"] = min(p["first"], r["started"])
+        p["last_active"] = max(p["last_active"], r["last_active"])
+    labellers = []
+    for p in people.values():
+        p["median_ms"] = _median(p.pop("ms"))
+        labellers.append(p)
+    for r in rows.values():
+        r["median_ms"] = _median(r.pop("ms"))
+
+    totals.update(labellers=len(labellers), labels=sum(r["labels"] for r in rows.values()),
+                  sessions_active=sum(1 for r in rows.values() if r["status"] == "active"),
+                  sessions_submitted=sum(1 for r in rows.values() if r["status"] == "submitted"))
+    return {"generated": _now(), "totals": totals,
+            "labellers": sorted(labellers, key=lambda p: (-p["labels"], p["labeller"])),
+            "sessions": sorted(rows.values(), key=lambda r: r["last_active"], reverse=True),
+            "games": games}
+
+
+def _median(xs):
+    if not xs:
+        return None
+    xs = sorted(xs)
+    mid = len(xs) // 2
+    return xs[mid] if len(xs) % 2 else (xs[mid - 1] + xs[mid]) / 2

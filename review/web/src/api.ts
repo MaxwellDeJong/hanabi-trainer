@@ -93,6 +93,8 @@ export interface Bundle {
   log: string[];
   clues: ClueRecord[];
   positions: { turn: number; board: Board; max_score: number; hands: number[][] }[];
+  /** The site's sound for each position (the action that led to it); null: the standard turn sound. */
+  sounds?: (string | null)[];
   seat_views: Obs[][];
   decisions: Decision[];
   checks: Check[];
@@ -132,6 +134,9 @@ export interface LabelView {
     frontier: number;
     ended: string | null;
     hints: number[];
+    /** Set once the labeller hands the session in; it is read-only from then on. */
+    submitted: string | null;
+    game_id: number;
   };
   game_over: boolean;
   own_turns: number[];
@@ -143,16 +148,98 @@ export interface LabelView {
   undone_turn?: number;
 }
 
+export type SessionStatus = "active" | "submitted";
+
 export interface SessionSummary {
   session_id: string;
+  game_id: number;
   labeller: string;
+  status: SessionStatus;
   started: string;
-  ended: string | null;
+  /** An active session expires then (24 hours after it started): its moves are dropped and the seat opens again. */
+  expires: string;
+  submitted: string | null;
+  last_active: string;
+  /** Played to the end (ready to submit, if still active). */
+  game_over: boolean;
   players: number;
   variant: string;
   you: string;
   turn: number;
   labels: number;
+  own_turns: number;
+}
+
+/** A game on the lobby board. */
+export interface BoardGame {
+  game_id: number;
+  players: number;
+  variant: string;
+  seats: {
+    name: string;
+    status: SessionStatus | "open";
+    labellers: string[];
+    /** Your session on this seat, if any. */
+    session_id: string | null;
+    /** Open: nobody has an active or submitted session on it. */
+    available: boolean;
+  }[];
+}
+
+export interface AdminSession extends SessionSummary {
+  seat: number;
+  chosen_by: string | null;
+  turns: number;
+  hints: number;
+  hint_labels: number;
+  after_reveal: number;
+  median_ms: number | null;
+}
+
+export interface AdminReport {
+  generated: string;
+  totals: {
+    games: number;
+    labelable_games: number;
+    seats: number;
+    open: number;
+    active: number;
+    submitted: number;
+    own_turns: number;
+    own_turns_submitted: number;
+    labellers: number;
+    labels: number;
+    sessions_active: number;
+    sessions_submitted: number;
+  };
+  labellers: {
+    labeller: string;
+    active: number;
+    submitted: number;
+    labels: number;
+    labels_submitted: number;
+    hint_labels: number;
+    after_reveal: number;
+    median_ms: number | null;
+    first: string;
+    last_active: string;
+  }[];
+  sessions: AdminSession[];
+  games: {
+    id: number;
+    players: string[];
+    variant: string;
+    turns: number;
+    errors: number;
+    seats: {
+      seat: number;
+      player: string;
+      anon: string;
+      status: SessionStatus | "open";
+      own_turns: number;
+      sessions: Pick<SessionSummary, "session_id" | "labeller" | "status" | "turn" | "labels" | "last_active">[];
+    }[];
+  }[];
 }
 
 async function call<T>(url: string, body?: unknown): Promise<T> {
@@ -173,7 +260,12 @@ export const getInspectBundle = (id: number): Promise<Bundle> => call(`/api/game
 
 export const listSessions = (labeller: string): Promise<SessionSummary[]> =>
   call(`/api/sessions?labeller=${encodeURIComponent(labeller)}`);
-export const startSession = (labeller: string): Promise<LabelView> => call("/api/sessions", { labeller });
+export const getBoard = (labeller: string): Promise<BoardGame[]> =>
+  call(`/api/board?labeller=${encodeURIComponent(labeller)}`);
+/** A random open seat, or the given one from the board. */
+export const startSession = (labeller: string, pick?: { game_id: number; seat: number }): Promise<LabelView> =>
+  call("/api/sessions", { labeller, ...pick });
+export const getAdmin = (): Promise<AdminReport> => call("/api/admin");
 export const getSession = (sid: string): Promise<LabelView> => call(`/api/sessions/${sid}`);
 export const sessionAction = (sid: string, action: string, body: Record<string, unknown> = {}): Promise<LabelView> =>
   call(`/api/sessions/${sid}/${action}`, body);

@@ -21,12 +21,14 @@ How labels are stored is deliberately left open (§8).
 | Look and feel | Copy a **live game on the site** (layout, card art, log wording, keys). Labellers know it well, which keeps labelling time low |
 | Controls | **Speedrun controls**: left-click plays your own card or gives a colour clue to a teammate's card; right-click discards your own card or gives a rank clue to a teammate's card |
 | Unit of labelling | **One seat of one game per session.** The labeller sees only that seat's view for the whole game, which preserves hidden information |
-| Actual move | Hidden by default. A **hint toggle** (Space) shows it when the labeller is stuck, and the label records that the hint was used |
+| Actual move | Hidden by default. A **hint toggle** (Tab) shows it when the labeller is stuck, and the label records that the hint was used |
 | Knowledge display | **Clue information only** (our `know`). The group plays with the site's pip-updating setting off and instead hovers a card to highlight the clue log entries that concern it (§4.2). No deduction from visible cards |
 | Player names | **Anonymised** in Label mode (§4.3) |
-| Advancing | **Your move advances the game at once**, as in a live game (no confirmation). → for each other player's turn. Going back is always possible |
+| Advancing | **Your move advances the game at once**, as in a live game (no confirmation). Space (or →) for each other player's turn, or **auto-advance** every so many seconds (a per-labeller setting, §4.1). Going back is always possible |
 | Extras | None: no skip, no throw-away mark, no notes, no on-screen control hints (labellers know the controls). Decided 2026-09-24 |
-| Which games | **Random sample** of (game, seat) pairs for now. Prioritising particular games may come later |
+| Which games | **Random sample** of (game, seat) pairs that nobody has claimed yet, or a seat picked from the lobby's board (searchable by game ID). Prioritising particular games may come later |
+| Several labellers | **One labeller per seat.** A seat with a session (in progress or submitted) is claimed and isn't handed out again. A labeller may take several seats of the same game (decided 2026-09-25). The lobby's board shows every game (by ID) and seat; an admin view shows coverage and contributions (§4.4). Decided 2026-09-25 |
+| Finishing | A session is **active** until the labeller **submits** it at the end of the game, with a move at every one of their turns. A submitted session is read-only (§4.1). A session not submitted within **24 hours** of its start expires: its moves are dropped and the seat is open again (§4.4) |
 | License | Borrowing from hanab.live (GPL-3.0) is fine. The borrowed code stays in its own directory (§7) so the licence doesn't extend to the engine or dataset code |
 | Game logic | The browser **does not compute game state**. It displays what the Python engine produced (§6), so inspecting the tool inspects the real training records |
 
@@ -69,11 +71,11 @@ Source: `Hanabi-Live/hanabi-live`, commit `c1d970b` (2026-09-18), the same commi
 A session is `(game, seat, labeller)`. It starts at turn 1 and runs to the end of the game.
 
 ```
-other player's turn ──(→)──► the real move is applied and logged ─┐
+other player's turn ─(Space)─► the real move is applied and logged ─┐
         ▲                                                         │
         │                                                         ▼
         └── the real move is applied ◄── labeller clicks a move ◄── labeller's turn
-            at once (shown in the log;                              (Space shows the actual move)
+            at once (shown in the log;                              (Tab shows the actual move)
             "you: X" if different)
 ```
 
@@ -82,8 +84,19 @@ other player's turn ──(→)──► the real move is applied and logged ─
   move with a small "you: …" marker (✓ when they match), so it's clear what happened.
 - **A click is the move.** As in a live game, clicking a move records it and the game goes on to the next
   turn straight away; cards animate as on the site (drawn from the deck, flying to the stacks or the
-  discard pile, hands shifting). → applies the next real move on other players' turns; on your own turn
-  it does nothing until you've chosen a move. ← goes back one turn at any time.
+  discard pile, hands shifting). Space (or →) applies the next real move on other players' turns; on your
+  own turn it does nothing until you've chosen a move. ← goes back one turn at any time.
+- **Auto-advance** (setting, decided 2026-09-25). In the lobby, "Turn advance" is Manual (Space / →) or
+  Auto, with the seconds per turn (0.5–60, default 2). With Auto, each other player's move is revealed
+  by itself after that many seconds. It waits while you look back at earlier turns, on your own turn,
+  while a panel is open and once the game is over. In Label mode an "Auto-advance" chip switches it on and
+  off mid-game, and − / + beside it change the seconds (0.5 s steps up to 3 s, 1 s up to 10 s, then 5 s). Kept in the browser (`localStorage`), like the labeller's name; nothing is recorded.
+- **Sounds as on the site.** Each newly revealed move plays the site's sound: hanab.live's own mp3 files,
+  chosen by its rules (`getSoundType.ts`): turn-us when it's now your turn, otherwise turn-other, and the
+  special sounds for blind plays (1–6 in a row), misplays (1 or 2 in a row), a lower max score ("sad") and
+  the end of the game (perfect, success or fail). As with the site's default settings, the H-group sounds
+  (discarding a clued card, double discards, order chop moves) are left out. Looking back at earlier turns
+  is silent, as in a replay. Decided 2026-09-25
 - **Undo** (Backspace) takes back your latest move and returns to that turn to choose again. Labels are
   append-only events, so undo adds a `retract` event and the new choice a new `label` event. A label made
   after the game has gone past its turn records `after_reveal` (hindsight): with moves applied at once,
@@ -92,6 +105,13 @@ other player's turn ──(→)──► the real move is applied and logged ─
   pulsing yellow outline and "Your turn" when it's the labeller's.
 - **Time to decide** is recorded for each label. It measures labelling cost and gives a weak confidence
   signal.
+- **Submitting.** When the game is over, a Submit button hands the session in. It's refused while any
+  of the labeller's turns has no move (after an undo, say); the tool jumps to the first such turn. A
+  submitted session can still be viewed (hint included, since every real move is public by then), but
+  moves, undo and hints are refused. Until then the session is **active**, and "ready to submit" once
+  the game is over. A successful submit is rewarded with fireworks (花火) in the game's suit colours
+  and a thank-you line for about 4.5 s (a click or key skips it; with reduced motion, just the line),
+  then the tool returns to the lobby for the next seat.
 
 ### 4.2 Input
 
@@ -107,9 +127,9 @@ positive clues on the card face and negative information when hovering. This is 
 
 | Key | Action |
 |---|---|
-| Space | Hint toggle: show the move that was actually made (arrows, as on the site; P/D for a play or discard) |
+| Tab | Hint toggle: show the move that was actually made (arrows, as on the site; P/D for a play or discard) |
 | Backspace | Undo your latest move and go back to that turn |
-| → | Next turn (reveals the next real move) |
+| Space or → | Next turn (reveals the next real move) |
 | ← `[` `]` Home End | Look back at earlier turns (never past the current turn) |
 
 With 6 plain suits, **every legal move is exactly one click on some card**: a legal clue touches at least
@@ -117,21 +137,45 @@ one card, and clicking any card it touches produces exactly that clue. We don't 
 never produce an illegal clue, and it is checked against `obs.legal` anyway.
 
 Later (not v0): card notes (Ctrl + right-click, as on the site), and "empathy" (seeing what teammates
-know about their own cards; needs a key other than Space, which is the hint).
+know about their own cards; needs a key other than Tab, which is the hint).
 
 ### 4.3 Keeping information hidden
 
 - **The browser only receives what the seat can know** (§6.1). Hiding cards on screen isn't enough once
   strangers label through devtools.
-- **One seat per labeller per game.** Labelling a second seat of the same game would show cards that were
-  hidden in the first session.
+- **Several seats of one game are fine.** A second seat of the same game shows cards that were hidden in
+  the first session, but once there are many games nobody remembers the cards of a particular one
+  (decided 2026-09-25; before, a labeller got at most one seat per game).
 - **Anonymised.** Players are shown as Alice, Bob, Cathy, Donald and Emily in seat order (Alice moves
-  first). The server replaces the names before sending anything. Label mode also hides everything that
-  would identify the game: the game ID (the site shows it on the deck), `seed`, date and final score.
-  With the game ID, a labeller could open the real replay and see their own hand.
+  first). The server replaces the names before sending anything, and leaves out `seed`, date and final score.
+- **The game ID is shown** (on the deck, as on the site, and in the lobby). With it a labeller could open
+  the real replay and see their own hand, but our labellers are trusted volunteers, so we rely on them not
+  to (decided 2026-09-25; before, labellers saw a keyed hash of the ID).
 - **No worry about memory.** A labeller may have played the game or the deal before, but these players
   have played too many games to remember hands, so we don't track it.
 - **The hint** shows the actual move. Every label records `hint_used`.
+
+### 4.4 Several labellers: claims, the board and the admin view
+
+- **Claims.** A (game, seat) with an active or submitted session is claimed and can't be started again,
+  whether picked from the board or at random. "Start a random open seat" picks only unclaimed seats.
+- **Expiry.** A session not submitted within 24 hours of its start expires, so abandoned sessions don't
+  hold seats. Its events are deleted from `<game_id>.jsonl`, the session file is kept with `expired` set
+  (so reopening it says it expired: 410), and it no longer counts anywhere: the seat is open again, and
+  the lobby and admin view leave it out. Expiry is checked whenever sessions are read, with no background
+  job. Submitted sessions never expire.
+- **The board** (lobby, per labeller): every game open for labelling by game ID, newest first, with its
+  players and variant, and each seat as ○ open (a "take" button), ✎ in progress or ✓ submitted, with
+  who's on it. A search box narrows it to a game ID, to pick a specific game. Your own seats link to your
+  session. Turn counts and scores are left out: they would hint at how the game ends. The lobby also
+  splits your sessions into **active** and **submitted**.
+- **The admin view** (`#/admin`, local/admin only, like Inspect): tiles and a bar for seats submitted /
+  in progress / open and own turns labelled in submitted seats; one row per labeller (sessions
+  submitted and active, moves, hint use, labels made after an undo, median time to decide, first and last
+  activity); every session, most recent first; and coverage by game with real player names
+  and each seat's status, labeller and progress. Games with check errors are listed as excluded.
+  At the bottom, the list of games to open in **Inspect mode** (§5). Labellers don't inspect games, so
+  the lobby doesn't list them (moved 2026-09-25); Inspect's Lobby button returns to the admin view.
 
 ---
 
@@ -171,14 +215,15 @@ actions has `T + 1` positions: before each action, plus the final position.
 | `log_anon[k]` | The same lines with the Label mode names (Alice, Bob, … by seat) |
 | `clues[]` | Every clue: `turn`, `giver`, `target` (absolute seats), `kind`, `value`, `touched` **and `missed`** (the rest of the recipient's hand, for the red clue log highlight) |
 | `positions[t]` | Board and every hand's card IDs in slot order, absolute seats (Inspect only) |
+| `sounds[t]` | The site's sound for position `t` (the action that led to it): an mp3 name from hanab.live's `public/sounds`, or null for the standard turn-us / turn-other, which depends on the listener's seat |
 | `seat_views[s][t]` | `obs` for seat `s` at every position, including turns where `s` doesn't act. Relative seats, as in the DecisionRecord |
 | `decisions[t]` | Full DecisionRecords for the acting player (Inspect only) |
 | `checks[]` | `{turn, check, ok, kind, detail}`: invariants and oracle comparisons. `kind` is `error` or `wording` |
 
 In Label mode the server sends only `seat_views[s]` (without `history` and `unseen`, which the screen doesn't
-use), and `log_anon` and `clues` cut off at the frontier (the furthest turn reached). The deck is sent only
+use), and `log_anon`, `clues` and `sounds` cut off at the frontier (the furthest turn reached). The deck is sent only
 as the identities the seat has seen by the frontier. The `private` field, the other seats' views, `decisions`,
-`checks`, the game ID, `seed`, the real names and the actual moves for turns not reached yet are never sent.
+`checks`, `seed`, the real names and the actual moves for turns not reached yet are never sent.
 The hint asks the server for one move at a time.
 
 Note for `representation.md`: DecisionRecord clue events list only `touched`. The missed cards can be
@@ -207,25 +252,27 @@ review/
   setup.sh      sparse checkout of hanab.live at c1d970b into vendor/, npm install, oracle bundle
   server/       Python: bundle.py (bundles + checks), labels.py (sessions + label events), serve.py (API + web app)
   labels/       Label data (local): sessions/<id>.json and one <game_id>.jsonl of events per game
-  web/          TypeScript + Vite, static files. GPL-3.0. Imports hanab.live's card drawing and images
+  web/          TypeScript + Vite, static files. GPL-3.0. Imports hanab.live's card drawing, images and sounds
                 unmodified from vendor/ (aliases in web/vite.config.ts)
   oracle/       Node: hanab.live's own reducer, built from vendor/
 ```
 
 | API | Purpose |
 |---|---|
-| `GET /api/games` | Game list with check status (Inspect lobby) |
+| `GET /api/games` | Game list with check status (Inspect list, admin view) |
 | `GET /api/games/<id>/inspect` | Full bundle (local/admin only) |
-| `GET /api/sessions?labeller=<name>` | That labeller's sessions, without game IDs (Label lobby) |
-| `POST /api/sessions` `{labeller}` | Start a session: a random (game, seat) from a game this labeller has no session in and with no check errors |
+| `GET /api/admin` | Coverage, labellers and sessions, with real player names (admin only, §4.4) |
+| `GET /api/sessions?labeller=<name>` | That labeller's sessions (active and submitted) (Label lobby) |
+| `GET /api/board?labeller=<name>` | Every game open for labelling, with each seat's status (§4.4) |
+| `POST /api/sessions` `{labeller, game_id?, seat?}` | Start a session on that (game, seat), refused if it's claimed; or without a game on a random unclaimed seat. Games with check errors are never used. Any session call on an expired session returns 410 |
 | `GET /api/sessions/<sid>` | The label view: the redacted bundle up to the frontier, labels, notes (resume) |
 | `POST /api/sessions/<sid>/advance` | Reveal the next move. Refused on the labeller's own turn until it has a label |
 | `POST /api/sessions/<sid>/labels` `{turn, choice, also_ok, ms_to_choice, advance}` | Append a label event, checked against that turn's `legal`. With `advance`, a label at the frontier also reveals the next move |
 | `POST /api/sessions/<sid>/retract` | Undo the latest label still in force |
 | `POST /api/sessions/<sid>/hint` `{turn}` | Reveal the actual move at one of the seat's turns (logged) |
+| `POST /api/sessions/<sid>/submit` | Hand in the session: the game is over and every own turn has a move. Afterwards every changing call is refused (409) |
 
-Label mode's API is keyed by **session, not game**, so the browser never learns the game ID (§4.3). Every
-session call returns the whole label view. Locally, the server is a small Python process and labels go to
+Label mode's API is keyed by **session**, not game. Every session call returns the whole label view. Locally, the server is a small Python process and labels go to
 one JSON-lines file per game. Hosting later means adding sign-in and a database behind the same API.
 
 ---
@@ -256,12 +303,16 @@ The other event kinds share the same header fields (`event_id` … `tool`):
 |---|---|---|
 | `retract` | `replaces`, `turn` | Undo (Backspace): the label event `replaces` is no longer in force |
 | `hint` | `turn`, `before_frontier` | The hint was shown at `turn` (logged once per turn) |
+| `submit` | `labels` | The session was submitted with this many labels in force |
 
 The label in force at a turn is the latest `label` event for it that hasn't been retracted. Events written
 before 2026-09-24 have `changed_after_reveal` instead of `after_reveal` (always false in that data).
 
 Session record (`review/labels/sessions/<id>.json`, rewritten on change): `game_id`, `seat`, `labeller`,
-`chosen_by` (`"random"`), `started`, `ended`, `frontier` (furthest turn revealed), `hints`.
+`chosen_by` (`"random"` or `"picked"` from the board), `started`, `ended` (the game was played to the end),
+`submitted` (when it was handed in; `null` while active; missing in sessions from before 2026-09-25, which
+are active), `expired` (when it expired, unsubmitted 24 hours after `started`; its events are deleted then),
+`frontier` (furthest turn revealed), `hints`.
 
 ---
 
@@ -284,6 +335,7 @@ Session record (`review/labels/sessions/<id>.json`, rewritten on change): `game_
 | 2 ✅ | Inspect mode, read-only: row layout, card art, action log, clue log with hover highlight, stacks, discard pile, counters, replay keys, site link | It reproduces screenshots 1–3 (done 2026-09-23, `docs/progress.md`) |
 | 3 ✅ | Label mode: random seat sessions, anonymisation, speedrun controls, hover preview, hint toggle, undo, saving to local files | A full seat of 78921 can be labelled and resumed (done 2026-09-23, `docs/progress.md`) |
 | 4 | Checks panel, game browser | |
+| 4a ✅ | Several labellers: submit vs active sessions, claims, lobby board, admin view | Done 2026-09-25 (`docs/progress.md`) |
 | 5 | Later: card notes, empathy, prioritised sampling, hosting (sign-in, database) | |
 
 Screenshot 3 is game **78822** (3 players, 9 actions), saved as `examples/export_78822.json`. The
