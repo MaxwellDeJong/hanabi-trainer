@@ -21,7 +21,11 @@ available, and `scripts/cdp.py` is a small driver built on them.
    # -> base=http://127.0.0.1:8799 labels=... log=...
    ```
    Use your session scratchpad, not `/tmp` or the repo. Run it again after every edit under
-   `review/web/src`, since the server only serves what was last built.
+   `review/web/src`, since the server only serves what was last built, and before re-running a check
+   that claims seats. Given the same scratch dir and port, it restarts its own earlier server (new
+   build, fresh labels). It refuses a port anything else holds. **Check that it printed `base=…`**:
+   don't pipe it through `tail -1` or `>/dev/null`, which can hide a refusal and leave you testing
+   an old build.
    **The app is muted by default**: the script passes `serve.py --mute`, which marks the page
    `<html data-mute>`, and `web/src/sounds.ts` then plays nothing. Otherwise every revealed move
    would play over the user's speakers. Pass `--sound` first
@@ -70,7 +74,8 @@ errors. For an animation, say that a still screenshot only shows one moment of i
   in an earlier run. Use a fresh labels directory (`serve_scratch.sh` makes one each time) or a
   different game or seat.
 - **The session id is `view["session"]["session_id"]`**, not `view["id"]`. `GET /api/sessions?labeller=<name>`
-  lists sessions with `session_id`.
+  returns a plain list of rows with `session_id`, newest first. `new_session` uses the labeller
+  `ui-check`.
 - **The store writes lazily**: there's no session file until the first label. An empty labels
   directory right after creating a session is expected.
 - `run.sh` also rebuilds every game bundle, which is slow and not needed for web-only changes.
@@ -93,9 +98,25 @@ errors. For an animation, say that a still screenshot only shows one moment of i
   The mismatch pulse lasts 1.6 s and peaks at about 0.3 s. The app redraws the whole stage often, so
   query the DOM rather than holding element handles.
 - **Hash-only navigation doesn't reload the app.** `b.nav()` reloads for you, which clears the app's
-  in-memory state (the undo/replay position) but not `localStorage`.
-- `localStorage` keys: `review.labeller` (lobby name), `review.advance` (Manual/Auto turn advance).
-  A fresh profile starts with Manual advance and no labeller name.
+  in-memory state (the undo/replay position and the paused state) but not `localStorage`.
+- **Raw `Page.navigate` to a URL that only changes the hash is unreliable.** Switching from one label
+  session to another, Chrome sometimes left the hash unchanged, and the reload that followed reopened
+  the old session (the symptom: "expected turn 2, at 5"). `b.nav()` now sets `location.hash` from the
+  page, waits for it and then reloads. It raises if the page lands on another route. Use `b.nav()`
+  rather than calling `Page.navigate` yourself.
+- `localStorage` keys: `review.labeller` (lobby name), `review.advance` (Manual/Auto turn advance,
+  JSON `{auto, seconds}`). A fresh profile starts with Manual advance and no labeller name. To test
+  Auto, set it before the app loads (see below) with `seconds: 1`:
+  `localStorage.setItem('review.advance', JSON.stringify({auto: true, seconds: 1}))`.
+- **Testing auto-advance timing:** poll the turn (`int(b.js("location.hash").rsplit("/", 1)[1])` in
+  Label mode) with a deadline, rather than fixed sleeps, which are flaky. To show that the game
+  *stood still*, sleep longer than `seconds` (by about 1 s) and check the turn didn't move.
+- **Tooltips** come from a `data-tip` attribute: read it with
+  `b.js("document.querySelector(sel).dataset.tip")`, and to screenshot one, `b.hover(sel)`, wait
+  about 0.3 s, then `b.shot(...)`. Call `b.unhover()` afterwards so the tooltip doesn't cover later
+  screenshots.
+- **Look at new text in the screenshot, not just the DOM.** A "⏸" glyph passed the DOM check but
+  rendered as a thin sliver in the stage font. Symbols and emoji can render badly there.
 - **Running code before the app loads** (spies, stubs): `b.nav()` reloads the page, so patches made
   with `b.js()` beforehand are lost. Register them with the raw protocol call before navigating:
   `b.cdp("Page.addScriptToEvaluateOnNewDocument", source="...")`. They then run before the app on
@@ -117,7 +138,8 @@ errors. For an animation, say that a still screenshot only shows one moment of i
   prints `sound=off` or `sound=on`, and `b.js("document.documentElement.hasAttribute('data-mute')")`
   tells you from the page.
 - When not muted, the app plays a sound on load at turn 0 and one for each revealed move. Moving back
-  (←, Home, a click on the progress bar) is silent.
+  (←, Home, a click on the progress bar) is silent and pauses the game. Space / → after that resumes
+  it, so each step forward plays its sound again.
 
 ## Reference
 
@@ -136,10 +158,23 @@ errors. For an animation, say that a still screenshot only shows one moment of i
 Label-mode tags are `.mark.chosen`, `.mark.alt` and `.mark.ghost`. Also useful: `.mismatch-pulse`,
 `.turn-box.yours`, `.action-log`, `.controls .status`, and `.message-line` (flash messages).
 
+**Replay area** (under the stacks): `button:has(> img.button-icon)`, with index 0 = rewind to the start,
+1 = one turn back, 2 = one turn forward (in Label mode it acts like →), 3 = to the newest turn. A disabled
+button is a real `disabled` button.
+
+**Label-mode play state:** `.paused-text` ("Paused: you went back", with a tooltip) appears next to
+the Auto-advance chip while Auto is on and the labeller has gone back. Going back pauses the game;
+Space / → resumes it.
+
 **Games to use:** `GET /api/games` lists the bundles. Game 78921 (2 players, 6 suits) is short and
-opens with a clue then a play, so it's handy for Label-mode checks.
+opens with a clue then a play, so it's handy for Label-mode checks. Sitting at `startingPlayer`, your
+turns are the odd ones (1, 3, 5…). Sitting at the other seat, they're the even ones. One labeller can
+hold both seats, so one check can create a session for each.
+Setting up an ongoing session: playing your slot 1 is always legal, so `b.click_card(seat, 0)` at each
+of your turns gets you ahead quickly. Whether it matches the recorded move doesn't matter.
 
 **`cdp.Browser` methods:** `nav(url)`, `click_card(holder, index, button, shift)`,
-`click_selector(sel, index)`, `key(k)`, `js(expr)`, `wait_for(expr)`, `text(sel)`, `shot(name)`, `errors`,
+`click_selector(sel, index)`, `hover(sel, index)`, `unhover()`, `key(k)`, `js(expr)`, `wait_for(expr)`,
+`text(sel)`, `shot(name)`, `errors`,
 and `cdp(method, **params)`: any raw DevTools protocol call (e.g. `Page.addScriptToEvaluateOnNewDocument`),
 returning its result.

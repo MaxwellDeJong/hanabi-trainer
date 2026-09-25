@@ -32,11 +32,13 @@ interface State {
   shownAt: number;
   busy: boolean;
   /**
-   * Replaying: you moved at a turn the game had already gone past (after an undo), so the game goes on
-   * from there through the moves already revealed, as live (auto-advance, sounds), until it catches up
-   * with the newest position. Looking around (←, Home, the log…) stops it.
+   * Paused: the labeller went back to look around (←, Home, the rewind buttons, the log…), so the game
+   * stands still: silent, no auto-advance. Space / → resumes it from there, and so does choosing a move.
+   * Otherwise the position shown is the game going on, as live (auto-advance, sounds): at the newest
+   * position, or behind it after an undo or a resume, replaying the moves already revealed until it
+   * catches up. Only ever true behind the newest position (see `setPos`).
    */
-  replay: boolean;
+  paused: boolean;
   /** When the game went on to position `pos` live after a move of yours the recorded one differs from. */
   pulse: { pos: number; start: number } | null;
 }
@@ -65,7 +67,7 @@ export async function showLabel(app: HTMLElement, sid: string, turn: number | nu
       app.replaceChildren(el("div", "message", `Could not load session: ${String(error)}`));
       return;
     }
-    st = { sid, data, pos: 0, pending: [], hint: false, message: "", shownAt: performance.now(), busy: false, replay: false, pulse: null };
+    st = { sid, data, pos: 0, pending: [], hint: false, message: "", shownAt: performance.now(), busy: false, paused: false, pulse: null };
     // As on the site, a sound on first load only at the start of the game.
     if (data.bundle.turns === 0 && data.session.submitted === null) playSound(0);
   }
@@ -79,10 +81,14 @@ export function redrawLabel(): void {
 // ---- Navigation and server calls ----------------------------------------------------------------------
 
 /**
- * Show position `pos`. `live`: the game going on by one move (your move or the next one revealed), with
- * its sound; otherwise the labeller is looking around, which is silent and stops a replay.
+ * How the position changes. "look": the labeller looking around, which is silent and pauses the game if
+ * that's behind the newest position. "step": the game going on by one move (yours, the next one revealed,
+ * or a resume), with its sound. "jump": the game going on from elsewhere, silently (an undo).
  */
-function setPos(pos: number, live = false): void {
+type Move = "look" | "step" | "jump";
+
+/** Show position `pos`. The one place `paused` changes. */
+function setPos(pos: number, how: Move = "look"): void {
   if (st === null) return;
   const p = Math.max(0, Math.min(st.data.bundle.turns, Number.isFinite(pos) ? pos : 0));
   if (p !== st.pos) {
@@ -90,11 +96,11 @@ function setPos(pos: number, live = false): void {
     st.hint = false;
     st.shownAt = performance.now();
   }
-  if (live && p === st.pos + 1) {
+  if (how === "step" && p === st.pos + 1) {
     playSound(p);
     if (mismatchAt(p) !== null) st.pulse = { pos: p, start: performance.now() };
   }
-  st.replay = live && st.replay && p < st.data.bundle.turns;
+  st.paused = how === "look" && p < st.data.bundle.turns;
   st.pos = p;
   history.replaceState(null, "", `#/label/${st.sid}/${p + 1}`);
   draw();
@@ -119,12 +125,13 @@ async function act(action: string, body: Record<string, unknown> = {}): Promise<
 
 async function advance(): Promise<void> {
   if (st === null) return;
-  if (isOwnTurn(st.pos) && st.data.labels[st.pos + 1] === undefined) {
+  if (awaitingMove(st.pos)) {
     flash("Choose a move first.");
     return;
   }
   if (st.pos < st.data.bundle.turns) {
-    setPos(st.pos + 1, st.replay);
+    // Behind the newest position: go on replaying, or resume it if paused.
+    setPos(st.pos + 1, "step");
     return;
   }
   if (st.data.game_over) {
@@ -132,7 +139,7 @@ async function advance(): Promise<void> {
     return;
   }
   const data = await act("advance");
-  if (data !== null) setPos(data.bundle.turns, true);
+  if (data !== null) setPos(data.bundle.turns, "step");
 }
 
 /**
@@ -149,10 +156,7 @@ async function choose(choice: Choice): Promise<void> {
     ms_to_choice: Math.round(performance.now() - st.shownAt),
     advance: true,
   });
-  if (data !== null && st !== null) {
-    st.replay = true;
-    setPos(pos + 1, true);
-  }
+  if (data !== null && st !== null) setPos(pos + 1, "step");
 }
 
 async function toggleAlso(choice: Choice): Promise<void> {
@@ -190,7 +194,7 @@ async function toggleHint(): Promise<void> {
 
 /**
  * Undo your latest move and go back to that turn to choose again. The game then goes on from there as
- * before: the moves after it are replayed (see `State.replay`).
+ * before: the moves after it are replayed (see `State.paused`).
  */
 async function undo(): Promise<void> {
   if (isSubmitted()) {
@@ -198,11 +202,7 @@ async function undo(): Promise<void> {
     return;
   }
   const data = await act("retract");
-  if (data?.undone_turn !== undefined && st !== null) {
-    setPos(data.undone_turn - 1);
-    st.replay = st.pos < st.data.bundle.turns;
-    draw();
-  }
+  if (data?.undone_turn !== undefined && st !== null) setPos(data.undone_turn - 1, "jump");
 }
 
 /** Hand the session in: only once the game is over and every one of your turns has a move. */
@@ -240,15 +240,15 @@ let autoKey = "";
 
 /**
  * With auto-advance on, reveal the next move after the set time whenever the game is waiting on another
- * player: at the newest position, or anywhere while replaying after an undo (where your own turns that
- * already have a move go on too). Never while looking back, on your own turn before you've moved or once
- * the game is over. Called on every draw; the timer only restarts when the position or the setting changes.
+ * player: at the newest position, or behind it unless paused (replaying, where your own turns that already
+ * have a move go on too). Never while paused, on your own turn before you've moved or once the game is
+ * over. Called on every draw; the timer only restarts when the position or the setting changes.
  */
 function scheduleAuto(): void {
   const s = st;
   const a = getAdvance();
-  const waiting = s !== null && a.auto && s.data.session.submitted === null && isLive() &&
-    (s.replay || !s.data.game_over) && !(isOwnTurn(s.pos) && s.data.labels[s.pos + 1] === undefined);
+  const waiting = s !== null && a.auto && s.data.session.submitted === null && !s.paused &&
+    (s.pos < s.data.bundle.turns || !s.data.game_over) && !awaitingMove(s.pos);
   const key = waiting ? `${s.sid}/${s.pos}/${a.seconds}` : "";
   if (key === autoKey) return;
   autoKey = key;
@@ -271,9 +271,14 @@ function scheduleAuto(): void {
   autoTimer = window.setTimeout(fire, a.seconds * 1000);
 }
 
-/** Whether the position shown is where the game is at: the newest one, or on the way to it in a replay. */
+/** Whether the position shown is the game going on (the newest one, or replaying towards it), not paused. */
 function isLive(): boolean {
-  return st !== null && (st.replay || st.pos === st.data.bundle.turns);
+  return st !== null && !st.paused;
+}
+
+/** Your own turn at `pos`, still without a move: the game waits for you there, paused or not. */
+function awaitingMove(pos: number): boolean {
+  return isOwnTurn(pos) && st!.data.labels[pos + 1] === undefined;
 }
 
 function isSubmitted(): boolean {
@@ -415,19 +420,32 @@ function draw(): void {
       };
       button("Hint (Tab)", "Show the move that was actually made at this turn (recorded as hint used)", () => void toggleHint(), s.hint);
       if (!submitted) button("Undo (⌫)", "Take back your latest move and choose again", () => void undo());
-      if (!submitted && (!data.game_over || s.replay)) {
+      if (!submitted && (!data.game_over || !atFrontier)) {
         // The lobby's "Turn advance" setting, changeable mid-game.
         const a = getAdvance();
+        const group = el("span", "advance");
+        const setting = el("span", "advance-setting");
         button("Auto-advance", a.auto
           ? `On: the other players' moves are revealed by themselves, one every ${a.seconds} s. Click for manual (Space / →)`
           : "Off: reveal the other players' moves with Space or →. Click to reveal them by themselves",
-        () => { setAdvance({ auto: !a.auto }); draw(); }, a.auto);
+        () => { setAdvance({ auto: !a.auto }); draw(); }, a.auto, setting);
         const stepper = el("span", a.auto ? "stepper" : "stepper off");
         const step = (dir: 1 | -1): void => { setAdvance({ seconds: stepSeconds(getAdvance().seconds, dir) }); draw(); };
         button("−", "Faster: fewer seconds per turn", () => step(-1), false, stepper);
         stepper.append(tip(el("span", "stepper-value", `${a.seconds} s`), "Seconds each of the other players' turns stays on screen with Auto-advance on"));
         button("+", "Slower: more seconds per turn", () => step(1), false, stepper);
-        buttons.append(stepper);
+        setting.append(stepper);
+        group.append(setting);
+        // Looking back paused it (where the game wouldn't wait for you anyway): the setting greyed out and
+        // hatched, and a note. Both carry the tooltip on how to carry on; the hatch covers the buttons.
+        if (a.auto && s.paused && !awaitingMove(pos)) {
+          group.classList.add("paused");
+          setting.append(el("span", "hatch"));
+          group.append(el("span", "paused-text", "Paused: you went back"));
+          tip(group, "Auto-advance is paused while you look back through the game. Press Space when you're " +
+            "ready: the game goes on from this turn and auto-advance takes over again.");
+        }
+        buttons.append(group);
       }
       if (data.game_over && !submitted) {
         button("Submit", "Hand in your moves for this seat. The session can't be changed afterwards", () => void submit(), true);
@@ -470,6 +488,8 @@ function draw(): void {
 
   renderTable(root, { bundle, pos, pov: seat, showOwn: false }, {
     goTo: setPos,
+    // As →: the game goes on (resuming it if paused).
+    forward: () => void advance(),
     setPov: () => {},
     toggleOwn: () => {},
     lobby: () => { location.hash = "#/"; },

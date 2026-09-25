@@ -11,8 +11,18 @@ scratch=${1:?usage: serve_scratch.sh [--sound] <scratch-dir> [port]}
 port=${2:-8799}
 repo=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
 
+# A scratch server from an earlier run with this same scratch dir is ours: restart it (new build, new
+# labels). Anything else on the port is left alone.
+for pid in $(lsof -ti:"$port" -sTCP:LISTEN 2>/dev/null); do
+  args=$(ps -o args= -p "$pid" 2>/dev/null || true)
+  if [[ "$args" == *review/server/serve.py* && "$args" == *"--labels $scratch/labels-"* ]]; then
+    echo "restarting the earlier scratch server on port $port (pid $pid)" >&2
+    kill "$pid"
+    timeout 10 bash -c "while lsof -ti:$port -sTCP:LISTEN >/dev/null 2>&1; do sleep 0.2; done"
+  fi
+done
 if lsof -ti:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
-  echo "port $port is already in use (a server from an earlier run, or the user's own)." >&2
+  echo "port $port is already in use (not by a scratch server for $scratch)." >&2
   echo "Look before killing:  lsof -i:$port -sTCP:LISTEN" >&2
   exit 1
 fi

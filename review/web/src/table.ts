@@ -40,6 +40,8 @@ export interface View {
 
 export interface Handlers {
   goTo(pos: number): void;
+  /** The one-turn forward button, if it should do more than go to the next position. */
+  forward?(): void;
   setPov(seat: number): void;
   toggleOwn(): void;
   lobby(): void;
@@ -204,7 +206,7 @@ export function renderTable(root: HTMLElement, view: View, on: Handlers, mode?: 
     icon.src = enabled ? img : disabledImg;
     b.append(icon);
     b.disabled = !enabled;
-    b.addEventListener("click", () => on.goTo(target));
+    b.addEventListener("click", () => (i === 2 && on.forward ? on.forward() : on.goTo(target)));
   });
 
   // ---- Inspect / Label controls (where the site has "Enter Hypothetical") ----------------------------
