@@ -29,6 +29,12 @@ interface State {
   /** When the current position was first shown (for `ms_to_choice`). */
   shownAt: number;
   busy: boolean;
+  /**
+   * Replaying: you moved at a turn the game had already gone past (after an undo), so the game goes on
+   * from there through the moves already revealed, as live (auto-advance, sounds), until it catches up
+   * with the newest position. Looking around (←, Home, the log…) stops it.
+   */
+  replay: boolean;
 }
 
 let st: State | null = null;
@@ -55,9 +61,9 @@ export async function showLabel(app: HTMLElement, sid: string, turn: number | nu
       app.replaceChildren(el("div", "message", `Could not load session: ${String(error)}`));
       return;
     }
-    st = { sid, data, pos: 0, pending: [], hint: false, message: "", shownAt: performance.now(), busy: false };
+    st = { sid, data, pos: 0, pending: [], hint: false, message: "", shownAt: performance.now(), busy: false, replay: false };
     // As on the site, a sound on first load only at the start of the game.
-    if (data.bundle.turns === 0 && data.session.submitted === null) playSound();
+    if (data.bundle.turns === 0 && data.session.submitted === null) playSound(0);
   }
   setPos(turn === null ? st.data.bundle.turns : turn - 1);
 }
@@ -68,7 +74,11 @@ export function redrawLabel(): void {
 
 // ---- Navigation and server calls ----------------------------------------------------------------------
 
-function setPos(pos: number): void {
+/**
+ * Show position `pos`. `live`: the game going on by one move (your move or the next one revealed), with
+ * its sound; otherwise the labeller is looking around, which is silent and stops a replay.
+ */
+function setPos(pos: number, live = false): void {
   if (st === null) return;
   const p = Math.max(0, Math.min(st.data.bundle.turns, Number.isFinite(pos) ? pos : 0));
   if (p !== st.pos) {
@@ -76,6 +86,8 @@ function setPos(pos: number): void {
     st.hint = false;
     st.shownAt = performance.now();
   }
+  if (live && p === st.pos + 1) playSound(p);
+  st.replay = live && st.replay && p < st.data.bundle.turns;
   st.pos = p;
   history.replaceState(null, "", `#/label/${st.sid}/${p + 1}`);
   draw();
@@ -86,10 +98,8 @@ async function act(action: string, body: Record<string, unknown> = {}): Promise<
   const s = st;
   s.busy = true;
   try {
-    const before = s.data.bundle.turns;
     s.data = await sessionAction(s.sid, action, body);
     s.message = "";
-    if (s.data.bundle.turns > before) playSound();
     return s.data;
   } catch (error) {
     flash(error instanceof Error ? error.message : String(error));
@@ -107,7 +117,7 @@ async function advance(): Promise<void> {
     return;
   }
   if (st.pos < st.data.bundle.turns) {
-    setPos(st.pos + 1);
+    setPos(st.pos + 1, st.replay);
     return;
   }
   if (st.data.game_over) {
@@ -115,10 +125,13 @@ async function advance(): Promise<void> {
     return;
   }
   const data = await act("advance");
-  if (data !== null) setPos(data.bundle.turns);
+  if (data !== null) setPos(data.bundle.turns, true);
 }
 
-/** Your move: recorded, and the game goes on to the next turn straight away, as in a live game. */
+/**
+ * Your move: recorded, and the game goes on to the next turn straight away, as in a live game. At a turn
+ * the game had already gone past (after an undo), it goes on by replaying the moves already revealed.
+ */
 async function choose(choice: Choice): Promise<void> {
   if (st === null) return;
   const pos = st.pos;
@@ -129,7 +142,10 @@ async function choose(choice: Choice): Promise<void> {
     ms_to_choice: Math.round(performance.now() - st.shownAt),
     advance: true,
   });
-  if (data !== null && st !== null) setPos(pos + 1);
+  if (data !== null && st !== null) {
+    st.replay = true;
+    setPos(pos + 1, true);
+  }
 }
 
 async function toggleAlso(choice: Choice): Promise<void> {
@@ -165,14 +181,21 @@ async function toggleHint(): Promise<void> {
   }
 }
 
-/** Undo your latest move and go back to that turn to choose again. */
+/**
+ * Undo your latest move and go back to that turn to choose again. The game then goes on from there as
+ * before: the moves after it are replayed (see `State.replay`).
+ */
 async function undo(): Promise<void> {
   if (isSubmitted()) {
     flash("This session is submitted and can't be changed.");
     return;
   }
   const data = await act("retract");
-  if (data?.undone_turn !== undefined) setPos(data.undone_turn - 1);
+  if (data?.undone_turn !== undefined && st !== null) {
+    setPos(data.undone_turn - 1);
+    st.replay = st.pos < st.data.bundle.turns;
+    draw();
+  }
 }
 
 /** Hand the session in: only once the game is over and every one of your turns has a move. */
@@ -196,10 +219,9 @@ async function submit(): Promise<void> {
   if (st?.sid === sid) location.hash = "#/";
 }
 
-/** The site's sound for the newest position (a move was just revealed). */
-function playSound(): void {
+/** The site's sound for position `pos` (the move before it was just made or revealed). */
+function playSound(pos: number): void {
   if (st === null) return;
-  const pos = st.data.bundle.turns;
   playTurnSound(st.data.bundle.sounds?.[pos], actorAt(pos) === st.data.session.seat);
 }
 
@@ -210,15 +232,16 @@ let autoTimer: number | undefined;
 let autoKey = "";
 
 /**
- * With auto-advance on, reveal the next move after the set time whenever the newest position is another
- * player's turn. Never while looking back, on your own turn or once the game is over. Called on every
- * draw; the timer only restarts when the position or the setting changes.
+ * With auto-advance on, reveal the next move after the set time whenever the game is waiting on another
+ * player: at the newest position, or anywhere while replaying after an undo (where your own turns that
+ * already have a move go on too). Never while looking back, on your own turn before you've moved or once
+ * the game is over. Called on every draw; the timer only restarts when the position or the setting changes.
  */
 function scheduleAuto(): void {
   const s = st;
   const a = getAdvance();
-  const waiting = s !== null && a.auto && s.pos === s.data.bundle.turns && !s.data.game_over && !isOwnTurn(s.pos) &&
-    s.data.session.submitted === null;
+  const waiting = s !== null && a.auto && s.data.session.submitted === null && isLive() &&
+    (s.replay || !s.data.game_over) && !(isOwnTurn(s.pos) && s.data.labels[s.pos + 1] === undefined);
   const key = waiting ? `${s.sid}/${s.pos}/${a.seconds}` : "";
   if (key === autoKey) return;
   autoKey = key;
@@ -239,6 +262,11 @@ function scheduleAuto(): void {
     });
   };
   autoTimer = window.setTimeout(fire, a.seconds * 1000);
+}
+
+/** Whether the position shown is where the game is at: the newest one, or on the way to it in a replay. */
+function isLive(): boolean {
+  return st !== null && (st.replay || st.pos === st.data.bundle.turns);
 }
 
 function isSubmitted(): boolean {
@@ -300,6 +328,7 @@ function draw(): void {
   const own = isOwnTurn(pos);
   const label = data.labels[turn];
   const atFrontier = pos === bundle.turns;
+  const live = isLive();
   const actual = data.actual[turn];
   const submitted = data.session.submitted !== null;
 
@@ -353,7 +382,7 @@ function draw(): void {
         status.append(el("span", "", `${names[actorAt(pos)]}'s turn`));
       }
       if (own && s.pending.length > 0) status.append(el("span", "alt-text", `(also OK: ${s.pending.map((c) => describe(c)).join(", ")})`));
-      if (own && actual !== undefined && (s.hint || !atFrontier)) {
+      if (own && actual !== undefined && (s.hint || !live)) {
         status.append(el("span", "actual-text", `Actual: ${describe(actual)}`));
       }
 
@@ -367,7 +396,7 @@ function draw(): void {
       };
       button("Hint (Tab)", "Show the move that was actually made at this turn (recorded as hint used)", () => void toggleHint(), s.hint);
       if (!submitted) button("Undo (⌫)", "Take back your latest move and choose again", () => void undo());
-      if (!submitted && !data.game_over) {
+      if (!submitted && (!data.game_over || s.replay)) {
         // The lobby's "Turn advance" setting, changeable mid-game.
         const a = getAdvance();
         button("Auto-advance", a.auto
@@ -397,7 +426,7 @@ function draw(): void {
         return;
       }
       if (!own) {
-        flash(atFrontier ? `It's ${names[actorAt(pos)]}'s turn: press Space to continue.` : "Not your turn.");
+        flash(live ? `It's ${names[actorAt(pos)]}'s turn: press Space to continue.` : "Not your turn.");
         return;
       }
       const choice = clickChoice(card, holder, e.button === 0);
