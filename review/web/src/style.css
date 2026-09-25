@@ -511,6 +511,39 @@ td.bad {
   color: #ffd2a6;
 }
 
+/* Auto-advance paused (the labeller went back): the setting greyed out under a hatch that takes the
+   pointer, so the whole group shows the tooltip instead of working the buttons. */
+.advance,
+.advance-setting {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+}
+
+.advance-setting {
+  position: relative;
+}
+
+.advance.paused .advance-setting > :not(.hatch) {
+  filter: grayscale(1);
+  opacity: 0.4;
+}
+
+.advance .hatch {
+  position: absolute;
+  inset: -0.2em;
+  border-radius: 0.5em;
+  border: 1px solid rgba(216, 213, 239, 0.35);
+  background: repeating-linear-gradient(135deg, rgba(216, 213, 239, 0.3) 0 2px, transparent 2px 7px);
+  cursor: help;
+}
+
+.paused-text {
+  color: #ffd2a6;
+  text-shadow: 0 0 4px black;
+  cursor: help;
+}
+
 .status .go-on {
   opacity: 0.75;
 }

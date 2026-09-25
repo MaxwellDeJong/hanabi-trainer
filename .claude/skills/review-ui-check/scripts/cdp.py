@@ -22,6 +22,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import shutil
 import signal
 import socket
@@ -171,23 +172,44 @@ class Browser:
 
     def nav(self, url: str) -> None:
         """Open a URL and wait for the stage to be drawn (any hash route: lobby, label, admin, game)."""
+        target = url.partition("#")[2]
+        # The route to land on; the app may rewrite a trailing turn (clamped, or added for #/label/<sid>).
+        route = "#" + re.sub(r"/\d+$", "", target)
         r = self.cdp("Page.navigate", url=url)
         if "loaderId" not in r:
-            # Same-document (hash-only) navigation: the app keeps its in-memory state. Reload for a clean start.
+            # Same-document (hash-only) navigation. Page.navigate sometimes leaves the hash unchanged here
+            # (seen switching between two label sessions), and a reload then reopens the old route. Set
+            # the hash from the page, wait for it, then reload: the app keeps in-memory state otherwise.
+            self.js(f"location.hash = {json.dumps('#' + target)}")
+            self.wait_for(f"location.hash.startsWith({json.dumps(route)})", timeout=5)
             self.cdp("Page.reload")
         time.sleep(0.2)
         self.wait_for("document.readyState === 'complete' && document.querySelector('#app *')")
+        if target and not self.js(f"location.hash.startsWith({json.dumps(route)})"):
+            raise RuntimeError(f"nav to {url} landed on {self.js('location.href')}")
 
     def click(self, x: float, y: float, button: str = "left", shift: bool = False) -> None:
         mods = 8 if shift else 0
         for kind in ("mousePressed", "mouseReleased"):
             self.cdp("Input.dispatchMouseEvent", type=kind, x=x, y=y, button=button, clickCount=1, modifiers=mods)
 
-    def click_selector(self, selector: str, index: int = 0, **kw) -> None:
+    def _center(self, selector: str, index: int) -> tuple[float, float]:
         x, y = self.js(f"""(() => {{ const e = document.querySelectorAll({json.dumps(selector)})[{index}];
             if (!e) throw new Error('no element {selector} [{index}]');
             const r = e.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; }})()""")
-        self.click(x, y, **kw)
+        return x, y
+
+    def click_selector(self, selector: str, index: int = 0, **kw) -> None:
+        self.click(*self._center(selector, index), **kw)
+
+    def hover(self, selector: str, index: int = 0) -> None:
+        """Move the mouse over an element, e.g. to show its `data-tip` tooltip (wait ~0.3 s, then shot)."""
+        x, y = self._center(selector, index)
+        self.cdp("Input.dispatchMouseEvent", type="mouseMoved", x=x, y=y)
+
+    def unhover(self) -> None:
+        """Move the mouse to the page's top-left corner, so no tooltip covers the next screenshot."""
+        self.cdp("Input.dispatchMouseEvent", type="mouseMoved", x=1, y=1)
 
     def click_card(self, holder: int, index: int, button: str = "left", shift: bool = False) -> None:
         """Mouse down on the `index`-th card (0 = leftmost = slot 1) in seat `holder`'s hand.
