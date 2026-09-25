@@ -166,6 +166,7 @@
     "misplay_knowable": false,
     "misplay_run_to_end": false,
     "end_misplay_run": 2,
+    "filters": [],
     "raw_action": {"type": 2, "target": 0, "value": 4}
   }
 }

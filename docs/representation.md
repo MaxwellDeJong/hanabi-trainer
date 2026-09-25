@@ -259,6 +259,7 @@ variant other than "No Variant" and "6 Suits", and the options `cardCycle`, `dec
 | `convert_live.py` | `parse_capture(text)`, `from_live(messages)`, `check_stream(record)` (§9) |
 | `decision.py` | `decisions(record)`, `decision_record(record, turn, viewer=)`, `summarize(record)` |
 | `check.py` | `check_record(record)`: the §9 checks |
+| `filters.py` | Label filters for the pretraining corpus (`label-filtering.md`): `FILTERS` with their status, `fired(engine, action)`, `firings(record, summary)` |
 | `record.py` | `load_game(path)` (a GameRecord or a raw export), `player_view(record, seat)` |
 | `download.py` | `download(ids, out_dir)`: polite fetching of `/export/<id>` into a permanent cache (one request at a time, ≥5 s apart by default, a cap per run, stops at the first error). For small hand-picked samples until bulk collection is approved |
 
@@ -268,6 +269,7 @@ python3 -m hanabi_data convert-export export.json > game.json
 python3 -m hanabi_data convert-live capture.txt --players a,b
 python3 -m hanabi_data decisions game.json > decisions.jsonl
 python3 -m hanabi_data check game.json ...
+python3 -m hanabi_data filters data/exports/*.json                                # moves the filters catch
 python3 -m pytest                                                                  # tests/
 ```
 
@@ -426,9 +428,10 @@ no label.
 | `total_turns` | Actions in the game | |
 | `turns_to_end` | Actions after this one (the last move has 0) | Find moves close to a loss |
 | `label_effect` | Flags: `misplay`; `lost_critical` (the reachable max score fell); `ended_game` (the rules ended the game right after it) | Flag moves that are probably mistakes |
-| `misplay_knowable` | A misplay of a card whose clue knowledge (`know`), minus identities in `gone`, allows no playable identity | Flag likely deliberate strikeouts (§10) |
+| `misplay_knowable` | A misplay of a card whose clue knowledge (`know`), minus identities in `gone`, allows no playable identity | Flag likely deliberate strikeouts (`label-filtering.md` §5.1) |
 | `misplay_run_to_end` | The move is part of the unbroken run of misplays (by anyone) that ended the game | |
 | `end_misplay_run` | Length of that run for the whole game (0 if the game didn't end on a misplay) | |
+| `filters` | The **agreed** label filters (`label-filtering.md` §3) that catch this move; `[]` if none | Drop provably bad labels from pretraining |
 | `raw_action` | The export's action for this move | Trace back to the export |
 
 ## 8. Worked example: game 78921, turn 4 (screenshot 1)
@@ -614,6 +617,7 @@ python3 -m hanabi_data decision examples/export_78921.json 4 --pretty
     "misplay_knowable": false,
     "misplay_run_to_end": false,
     "end_misplay_run": 2,
+    "filters": [],
     "raw_action": {"type": 2, "target": 0, "value": 4}
   }
 }
@@ -627,7 +631,7 @@ Things to note:
 - The label is also in `legal`. The history has 4 events. As compact JSON, `obs` is ~2.4 KB and the
   whole record ~3.0 KB.
 - `meta` already knows how the game ends: a strikeout on turn 11 (`turns_to_end: 7`), whose last two
-  misplays form the run to the end (`end_misplay_run: 2`, §10).
+  misplays form the run to the end (`end_misplay_run: 2`, `label-filtering.md` §5.1).
 
 ---
 
@@ -684,46 +688,16 @@ records on demand, with an optional cache.
 
 ---
 
-## 10. Label quality: deliberate strikeouts
+## 10. Label quality
 
-The group **sometimes strikes out on purpose** to abandon a deal. Those moves are real actions in the
-export and look no different from genuine misplays, but they aren't attempts to play well. Using them as
-labels would teach the model to throw games away.
-
-Game 78921 is an example. It ends in three misplays on turns 8, 10 and 11:
-1. a clued Y1 after Y1 was already played
-2. G2 with G1 not yet played
-3. a duplicate T1
-
-The last two look deliberate. The first may be a genuine mistake, which is also a poor label, for a
-different reason.
-
-What this means for the design:
-- **The export doesn't say which misplays were deliberate.** Any detection has to be a heuristic, or a
-  manual label on a sample of games.
-- **The damage is probably concentrated at the end of a game.** The moves before a deliberate strikeout
-  may be perfectly good labels. So the filter should probably drop a *run* of moves before the end, not
-  the whole game. Most of the 9,084 zero-score games could still contribute.
-- **Signals the engine computes,** in `meta` (§7.3):
-  - `misplay_run_to_end`: whether the move is part of an unbroken run of misplays that ends the game.
-  - `misplay_knowable`: whether a misplay was of a card the actor could already know was unplayable
-    (from `know` and `board.gone`), e.g. a known duplicate.
-  - `end_misplay_run`: how many misplays that final run has. With `turns_to_end`, this gives the
-    distance from the start of the run to the end.
-
-  On 78921 they flag turns 10 and 11 as the run to the end, and not turn 8. None of the three is
-  `misplay_knowable`: the clues said "1" or "2" but never the colour, so each card could still have been
-  playable. Only a holder counting the cards they could see would know better (Q6).
-- Whether to keep **genuine** mistakes, which are still bad moves but are not throw-aways, belongs to the
-  wider filtering discussion (Q1).
+Moved to **`label-filtering.md`**: the two training phases, the filtering decisions, the filters,
+deliberate strikeouts (its §5.1), proposals, open questions and progress.
 
 ---
 
 ## 11. Open questions
 
-1. **Label filtering policy.** Which moves from lost games are usable? Deliberate strikeouts do happen
-   (§10): which heuristic detects them, and should it be checked against hand-labelled games? Keep or drop
-   genuine mistakes? Weight moves by result or by player?
+1. **Label filtering policy.** Tracked in `label-filtering.md` (decisions §2, open questions §7).
 2. **Convention drift.** Filter by date, weight toward recent games, or add a date/era marker to `obs`?
 3. **Model format and token budget.** Which model reads this, and at what context length? That decides
    the compact format's size. JSON field names are a large share of the ~2.4 KB of `obs`.
