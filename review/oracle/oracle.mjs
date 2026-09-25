@@ -25,7 +25,8 @@ function reduce(state, action, metadata) {
 function makeMetadata(ex) {
   const n = ex.players.length;
   const base = g.getDefaultMetadata(n, ex.options?.variant ?? "No Variant");
-  const known = new Set(["variant", "timed", "timeBase", "timePerTurn", "allOrNothing", "startingPlayer"]);
+  // speedrun only changes when the server ends the game (SpeedrunFail), which the reducer doesn't decide.
+  const known = new Set(["variant", "timed", "timeBase", "timePerTurn", "allOrNothing", "speedrun", "startingPlayer"]);
   const unknown = Object.keys(ex.options ?? {}).filter((k) => !known.has(k));
   if (unknown.length > 0) {
     // Options such as oneExtraCard change hand sizes; fail rather than replay them wrongly.
@@ -37,6 +38,7 @@ function makeMetadata(ex) {
     options: {
       ...base.options,
       allOrNothing: ex.options?.allOrNothing ?? false,
+      speedrun: ex.options?.speedrun ?? false,
       startingPlayer: ex.options?.startingPlayer ?? 0,
     },
   };
@@ -132,12 +134,10 @@ export function replayExport(ex) {
       }
 
       case GAME_OVER:
-      case VOTE_END: {
-        state = reduce(state, {
-          type: "gameOver", endCondition: a.type === VOTE_END ? 10 : a.value, playerIndex: a.target ?? player, votes: [],
-        }, metadata);
-        break;
-      }
+      case VOTE_END:
+        // Not a turn: nobody moves, and the engine's positions stop before it (the reducer would only
+        // add "… terminated the game!" and set the recorded score to 0). So no snapshot.
+        return;
 
       default:
         throw new Error(`unknown action type ${a.type} at index ${k}`);

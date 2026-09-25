@@ -13,7 +13,8 @@ node review/oracle/oracle.mjs prototype/examples/export_78921.json
 - **Built from source, not npm.** `@hanabi-live/game` 0.0.8 on npm is older than the repo (8.6k diff
   lines, including log wording), so `review/setup.sh` builds the commit `docs/representation.md` §4 cites.
 - **Adapted from** `packages/client/test/loadGameJSON.ts`: options come from the export, player names
-  are real, no fake "gameOver" is appended, and a snapshot is taken after every action.
+  are real, no fake "gameOver" is appended, and a snapshot is taken after every action except an end
+  action (type 4/5), which is not a turn.
 - **Per-turn state only.** The reducer does not decide when a game ends (hanab.live's server does), so
   end conditions are not checked here.
 - **Log wording is not the site's.** new.playhanabi.com runs an older version; see
