@@ -33,7 +33,7 @@ def test_record_fields():
 
 
 def test_deliberate_strikeout_metadata():
-    """78921 ends with misplays on turns 8, 10 and 11; only the last two form the run to the end (§10)."""
+    """78921 ends with misplays on turns 8, 10 and 11; only the last two form the run to the end (label-filtering.md §5.1)."""
     ds = {d["key"]["turn"]: d["meta"] for d in decisions(from_export(load_export("78921")))}
     assert ds[8]["label_effect"] == ["misplay"] and not ds[8]["misplay_run_to_end"]
     assert ds[9]["label_effect"] == [] and not ds[9]["misplay_run_to_end"]

@@ -35,8 +35,10 @@ def caught(actions):
 
 # Turn 1: seat 0 gives seat 1 a clue; turn 2: seat 1 clues seat 0's two 5s.
 FIVES_CLUED = [rank_clue(1, 1), rank_clue(0, 5)]
-# Then seat 1 plays R1-R4 while seat 0 discards its 1s: the R stack is at 4 after turn 10.
-RED_TO_4 = [discard(4), play(R1), discard(3), play(R2), discard(2), play(R3), rank_clue(1, 4), play(R4a)]
+# Then seat 1 plays R1-R4 while seat 0 discards or clues: the R stack is at 4 after turn 10.
+RED_TO_4 = [discard(4), play(R1), rank_clue(1, 4), play(R2), discard(3), play(R3), rank_clue(1, 4), play(R4a)]
+# Then seat 1 discards both R4s instead: R can't reach 5 after turn 6.
+RED_DEAD = [rank_clue(1, 4), discard(R4a), rank_clue(1, 4), discard(R4b)]
 
 
 def test_play_clued_5_with_no_4_on_the_board():
@@ -50,7 +52,7 @@ def test_play_clued_5_that_could_be_the_suit_at_4():
 
 def test_play_clued_5_whose_suit_is_known_and_not_at_4():
     # A yellow clue rules out R: now the Y5 play is certainly a misplay.
-    actions = FIVES_CLUED + RED_TO_4[:-1] + [color_clue(0, "Y"), play(R4a), play(Y5)]
+    actions = FIVES_CLUED + RED_TO_4 + [rank_clue(1, 4), color_clue(0, "Y"), play(Y5)]
     assert caught(actions) == ["play_clued_5_no_4"]
 
 
@@ -64,22 +66,22 @@ def test_discard_clued_5():
 
 def test_discard_clued_5_that_could_be_in_a_dead_suit():
     # Both R4s are discarded, so R can't reach 5, and seat 0's card could be R5.
-    actions = FIVES_CLUED + [discard(4), discard(R4a), discard(3), discard(R4b), discard(Y5)]
+    actions = FIVES_CLUED + RED_DEAD + [discard(Y5)]
     assert caught(actions) == []
 
 
 def test_discard_clued_5_known_to_be_in_a_live_suit():
-    actions = FIVES_CLUED + [discard(4), discard(R4a), discard(3), discard(R4b), color_clue(0, "Y"),
-                             play(R1), discard(Y5)]
+    actions = FIVES_CLUED + RED_DEAD + [rank_clue(1, 1), color_clue(0, "Y"), discard(Y5)]
     assert caught(actions) == ["discard_clued_5_live"]
 
 
 def test_meta_lists_agreed_filters_only(monkeypatch):
     record = game(FIVES_CLUED + [play(R5)])
-    assert [d["meta"]["filters"] for d in decisions(record)] == [[], [], []]
+    # The fourth record is the position after the play: no label, so no filters.
+    assert [d["meta"]["filters"] for d in decisions(record)] == [[], [], [], None]
     name = "play_clued_5_no_4"
     monkeypatch.setitem(filters.BY_NAME, name, dataclasses.replace(filters.BY_NAME[name], status=AGREED))
-    assert [d["meta"]["filters"] for d in decisions(record)] == [[], [], [name]]
+    assert [d["meta"]["filters"] for d in decisions(record)] == [[], [], [name], None]
 
 
 def test_firings_report():
