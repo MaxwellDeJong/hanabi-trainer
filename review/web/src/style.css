@@ -512,7 +512,8 @@ td.bad {
 }
 
 /* Auto-advance paused (the labeller went back): the setting greyed out under a hatch that takes the
-   pointer, so the whole group shows the tooltip instead of working the buttons. */
+   pointer, so the whole group shows the tooltip instead of working the buttons. The lobby greys out
+   the controls that need a name the same way (.needs-name). */
 .advance,
 .advance-setting {
   display: inline-flex;
@@ -529,7 +530,7 @@ td.bad {
   opacity: 0.4;
 }
 
-.advance .hatch {
+.hatch {
   position: absolute;
   inset: -0.2em;
   border-radius: 0.5em;
@@ -649,6 +650,32 @@ td.bad {
 
 .label-section {
   margin-bottom: 28px;
+}
+
+/* No name yet: starting a session is greyed out under a hatch (its tooltip asks for a name), and the
+   name field and a prompt next to it stand out. Typing a name lifts it at once. */
+.needs-name {
+  position: relative;
+  display: inline-flex;
+}
+
+.no-name .needs-name > :not(.hatch) {
+  filter: grayscale(1);
+  opacity: 0.4;
+}
+
+.label-section:not(.no-name) .needs-name > .hatch,
+.label-section:not(.no-name) .name-prompt {
+  display: none;
+}
+
+.no-name .labeller-input {
+  border-color: var(--active);
+  box-shadow: 0 0 0 2px rgba(231, 210, 124, 0.25);
+}
+
+.name-prompt {
+  color: var(--active);
 }
 
 .name-input {
