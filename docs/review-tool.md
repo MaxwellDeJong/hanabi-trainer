@@ -88,7 +88,7 @@ other player's turn ─(Space)─► the real move is applied and logged ─┐
   own turn it does nothing until you've chosen a move. ← goes back one turn at any time.
 - **Auto-advance** (setting, decided 2026-09-25). In the lobby, "Turn advance" is Manual (Space / →) or
   Auto, with the seconds per turn (0.5–60, default 2). With Auto, each other player's move is revealed
-  by itself after that many seconds. It waits while you look back at earlier turns, on your own turn,
+  by itself after that many seconds. It waits while you look back at earlier turns (a replay after an undo is not looking back), on your own turn,
   while a panel is open and once the game is over. In Label mode an "Auto-advance" chip switches it on and
   off mid-game, and − / + beside it change the seconds (0.5 s steps up to 3 s, 1 s up to 10 s, then 5 s). Kept in the browser (`localStorage`), like the labeller's name; nothing is recorded.
 - **Sounds as on the site.** Each newly revealed move plays the site's sound: hanab.live's own mp3 files,
@@ -100,7 +100,11 @@ other player's turn ─(Space)─► the real move is applied and logged ─┐
 - **Undo** (Backspace) takes back your latest move and returns to that turn to choose again. Labels are
   append-only events, so undo adds a `retract` event and the new choice a new `label` event. A label made
   after the game has gone past its turn records `after_reveal` (hindsight): with moves applied at once,
-  that is every label after an undo.
+  that is every label after an undo. After the new move the game goes on from there as it did before:
+  the moves already revealed are replayed as live (auto-advance, sounds; your own turns that still have
+  a move pass too) until it's back at the newest position, where it carries on as usual. The real move
+  at the undone turn isn't shown there (except with the hint). Looking back (←, Home, the log…) stops
+  the replay.
 - **Whose turn it is** is shown by the site's dark box behind the active hand plus a ▶ marker, and a
   pulsing yellow outline and "Your turn" when it's the labeller's.
 - **Time to decide** is recorded for each label. It measures labelling cost and gives a weak confidence
