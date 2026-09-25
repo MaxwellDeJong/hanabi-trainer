@@ -38,27 +38,29 @@ export async function showAdmin(app: HTMLElement): Promise<void> {
   };
   tile("Seats submitted", `${t.submitted} / ${t.seats}`, pct(t.submitted, t.seats));
   tile("Seats in progress", String(t.active), `${t.open} open`);
-  tile("Turns labelled", `${t.own_turns_submitted} / ${t.own_turns}`, `${pct(t.own_turns_submitted, t.own_turns)} (submitted seats)`);
-  tile("Labellers", String(t.labellers), `${t.sessions_active} active · ${t.sessions_submitted} submitted sessions`);
+  tile("Turns labeled", `${t.own_turns_submitted} / ${t.own_turns}`, `${pct(t.own_turns_submitted, t.own_turns)} (submitted seats)`);
+  tile("Labelers", String(t.labellers), `${t.sessions_active} active · ${t.sessions_submitted} submitted sessions`);
   tile("Games", `${t.labelable_games} / ${t.games}`,
-    t.games > t.labelable_games ? `${t.games - t.labelable_games} excluded (check errors)` : "all open for labelling");
-  page.append(tiles, meter(t));
+    t.games > t.labelable_games ? `${t.games - t.labelable_games} excluded (check errors)` : "all open for labeling");
+  page.append(tiles, meter(t), coverageCharts(r.games));
 
-  // ---- Labellers --------------------------------------------------------------------------------
-  page.append(el("h2", "", "Labellers"));
+  // ---- Labelers ---------------------------------------------------------------------------------
+  page.append(heading("h2", "Labelers",
+    "One row per labeler: their sessions still in force (submitted or active) and the moves chosen in them. " +
+    "Expired sessions don't count. Most moves first."));
   if (r.labellers.length === 0) {
     page.append(el("p", "hint", "No sessions yet."));
   } else {
     page.append(table(
-      ["Labeller", "Submitted", "Active", "Moves", "In submitted", "Hint used", "After undo", "Median time", "First seen", "Last active"],
+      ["Labeler", "Submitted", "Active", "Moves", "In submitted", "Hint used", "After undo", "Median time", "First seen", "Last active"],
       r.labellers.map((p) => [p.labeller, String(p.submitted), String(p.active), String(p.labels), String(p.labels_submitted),
         `${p.hint_labels} (${pct(p.hint_labels, p.labels)})`, String(p.after_reveal), seconds(p.median_ms),
         p.first.slice(0, 10), ago(p.last_active)]),
-      ["", "num", "num", "num", "num", "num", "num", "num", "", ""]));
+      ["", "num", "num", "num", "num", "num", "num", "num", "", ""], LABELER_TIPS));
   }
 
   // ---- Sessions ---------------------------------------------------------------------------------
-  page.append(el("h2", "", "Sessions"), el("p", "hint",
+  page.append(heading("h2", "Sessions",
     "Most recent first. An active session claims its seat until it's submitted, or until it expires 24 hours after it " +
     "started: then its moves are dropped and the seat is open again."));
   if (r.sessions.length > 0) {
@@ -68,8 +70,8 @@ export async function showAdmin(app: HTMLElement): Promise<void> {
         `${Math.min(x.turn, x.turns + 1)} / ${x.turns + 1}`, `${x.labels} / ${x.own_turns}`, String(x.hints),
         x.chosen_by ?? "", ago(x.last_active)];
     });
-    const tbl = table(["Labeller", "Game", "Seat", "Status", "Turn", "Moves", "Hints", "Chosen", "Last active"], rows,
-      ["", "num", "", "", "num", "num", "num", "", ""]);
+    const tbl = table(["Labeler", "Game", "Seat", "Status", "Turn", "Moves", "Hints", "Chosen", "Last active"], rows,
+      ["", "num", "", "", "num", "num", "num", "", ""], SESSION_TIPS);
     r.sessions.forEach((x, i) => {
       const tr = tbl.rows[i + 1]!;
       tr.classList.add(x.status);
@@ -79,19 +81,19 @@ export async function showAdmin(app: HTMLElement): Promise<void> {
   }
 
   // ---- Coverage ---------------------------------------------------------------------------------
-  page.append(el("h2", "", "Coverage by game"), el("p", "hint",
-    "Each seat: status, who labelled it and how far they got. Games with check errors are never handed out."));
+  page.append(heading("h2", "Coverage by game",
+    "Newest game first, with the players' real names. Each seat: its status (✓ submitted, ✎ in progress, ○ open), " +
+    "who labeled it and how far they got. Games with check errors are never handed out."));
   const width = Math.max(0, ...r.games.map((g) => g.players.length));
-  const heads = ["Game", "Variant", "Turns", ...Array.from({ length: width }, (_, k) => `Seat ${k}`)];
+  const heads = ["Game", "Variant", "Turns", "Score", "Bombs", ...Array.from({ length: width }, (_, k) => `Seat ${k}`)];
   const cov = el("table", "games coverage");
-  const head = el("tr");
-  for (const h of heads) head.append(el("th", "", h));
-  cov.append(head);
+  cov.append(headRow(heads, COVERAGE_TIPS));
   for (const g of [...r.games].sort((a, b) => b.id - a.id)) {
     const tr = el("tr");
     const id = el("td", "num");
     linkGame(id, g.id, 0);
-    tr.append(id, el("td", "", g.variant), el("td", "num", String(g.turns)));
+    tr.append(id, el("td", "", g.variant), el("td", "num", String(g.turns)), el("td", "num", `${g.score} / ${g.max_score}`),
+      el("td", "num", String(g.bombs)));
     if (g.errors > 0) {
       const td = el("td", "bad", `excluded: ${g.errors} check errors`);
       td.colSpan = width;
@@ -111,6 +113,39 @@ export async function showAdmin(app: HTMLElement): Promise<void> {
   page.append(cov, inspectSection(games));
   app.replaceChildren(page);
 }
+
+const LABELER_TIPS: Record<string, string> = {
+  Labeler: "The name they entered in the lobby",
+  Submitted: "Sessions handed in: seats done",
+  Active: "Sessions started but not submitted yet",
+  Moves: "Moves chosen in all their sessions, submitted and active",
+  "In submitted": "Moves chosen in submitted sessions only",
+  "Hint used": "Moves chosen after revealing the real move with the hint, and their share of all their moves",
+  "After undo": "Moves chosen at a turn whose real move had already been revealed: re-chosen after an undo",
+  "Median time": "Median time from a position being shown to a move being chosen",
+  "First seen": "When their first session still in force started (UTC)",
+  "Last active": "Their latest activity in any session",
+};
+
+const SESSION_TIPS: Record<string, string> = {
+  Labeler: "Who the session belongs to",
+  Game: "The game's ID. Click it to inspect the game from this seat's view",
+  Seat: "The anonymous name the labeler plays as, and the seat number",
+  Status: "✓ submitted, or ✎ in progress with when it expires. \"Ready to submit\": played to the end, not handed in yet",
+  Turn: "The furthest turn reached, out of the game's turns plus the final position",
+  Moves: "Moves chosen, out of the seat's own turns",
+  Hints: "Times the labeler revealed the real move with the hint",
+  Chosen: "How the seat was taken: random (the Start button) or picked from the lobby's board",
+  "Last active": "Latest activity in this session",
+};
+
+const COVERAGE_TIPS: Record<string, string> = {
+  Game: "The game's ID. Click it to inspect the game",
+  Turns: "Number of turns the game lasted",
+  Score: "Cards played correctly (the sum of the stacks), out of the maximum. This is not the site's score, " +
+    "which is 0 for any game short of the maximum under All or Nothing",
+  Bombs: "Misplays (strikes) by the end of the game",
+};
 
 const INSPECT_TIPS: Record<string, string> = {
   Game: "The game's ID on the site",
@@ -148,6 +183,104 @@ function inspectSection(games: GameSummary[]): HTMLElement {
   return box;
 }
 
+// ---- Coverage charts -------------------------------------------------------------------------------
+
+const STATUSES = ["submitted", "active", "open"] as const;
+type Status = (typeof STATUSES)[number];
+type Counts = Record<Status, number>;
+type Games = AdminReport["games"];
+
+/** Seats of the labelable games by suit count, final score and bombs, each column stacked by seat status.
+ * A seat is one labelling task, so a 3-player game counts 3 times. */
+function coverageCharts(games: Games): HTMLElement {
+  const box = el("div");
+  box.append(heading("h2", "Coverage at a glance",
+    "Every seat of every game open for labeling, split by status: a seat is one labeling task, so a " +
+    "3-player game counts 3 times. Games with check errors are left out. Hover a column for its numbers."));
+  const seats = games.filter((g) => g.errors === 0).flatMap((g) => g.seats.map((x) => ({ g, status: x.status })));
+  if (seats.length === 0) {
+    box.append(el("p", "hint", "No games open for labeling."));
+    return box;
+  }
+  const legend = el("div", "control-row meter-legend");
+  for (const st of STATUSES) {
+    const item = el("span", `legend ${st}`);
+    item.append(el("span", "swatch"), el("span", "", `${ICON[st]} ${WORD[st]}`));
+    legend.append(item);
+  }
+  /** Seats counted by `key`, one bin per value in `values`. */
+  const bins = (values: number[], key: (g: Games[number]) => number): Map<number, Counts> => {
+    const out = new Map(values.map((v) => [v, { submitted: 0, active: 0, open: 0 }]));
+    for (const x of seats) {
+      const c = out.get(key(x.g));
+      if (c !== undefined) c[x.status]++;
+    }
+    return out;
+  };
+  const range = (lo: number, hi: number): number[] => Array.from({ length: hi - lo + 1 }, (_, k) => lo + k);
+  const suits = [...new Set(seats.map((x) => x.g.suits))].sort((a, b) => a - b);
+  const maxScore = Math.max(...seats.map((x) => x.g.max_score));
+  const maxBombs = Math.max(3, ...seats.map((x) => x.g.bombs));
+  const row = el("div", "charts");
+  row.append(
+    columnChart("Variant", "small", bins(suits, (g) => g.suits), (v) => `${v} suits`, (v) => `${v} suits`),
+    columnChart("Final score (cards played)", "wide", bins(range(0, maxScore), (g) => g.score), (v) => `Score ${v}`,
+      (v) => (v % 5 === 0 ? String(v) : "")),
+    columnChart("Bombs", "small", bins(range(0, maxBombs), (g) => g.bombs), (v) => `${v} bomb${v === 1 ? "" : "s"}`,
+      String),
+  );
+  box.append(legend, row);
+  return box;
+}
+
+/** One chart card: a column per bin, stacked bottom-up submitted / in progress / open. `name` titles a bin in
+ * its tooltip; `axis` is its label under the axis ("" to skip one where the axis is crowded). */
+function columnChart(title: string, size: "small" | "wide", data: Map<number, Counts>, name: (v: number) => string,
+  axis: (v: number) => string): HTMLElement {
+  const card = el("div", `chart ${size}`);
+  card.append(el("div", "chart-title", title));
+  const total = (c: Counts): number => c.submitted + c.active + c.open;
+  const { top, step } = yAxis(Math.max(1, ...[...data.values()].map(total)));
+  const plot = el("div", "chart-plot");
+  for (let y = 0; y <= top; y += step) {
+    const line = el("div", "chart-grid");
+    line.style.bottom = `${(100 * y) / top}%`;
+    line.append(el("span", "chart-tick", String(y)));
+    plot.append(line);
+  }
+  const cols = el("div", "chart-cols");
+  const labels = el("div", "chart-labels");
+  const direct = data.size <= 8;  // a total on every cap only while there's room for it
+  for (const [v, c] of data) {
+    const n = total(c);
+    const slot = el("div", "chart-slot");
+    const bar = el("div", "chart-bar");
+    bar.style.height = `${(100 * n) / top}%`;
+    for (const st of STATUSES) {
+      if (c[st] === 0) continue;
+      const seg = el("div", `chart-seg ${st}`);
+      seg.style.flexGrow = String(c[st]);
+      bar.append(seg);
+    }
+    if (direct && n > 0) slot.append(el("div", "chart-cap", String(n)));
+    slot.append(bar);
+    const parts = STATUSES.map((st) => `${ICON[st]} ${WORD[st]}: ${c[st]}`).join("\n");
+    tip(slot, `${name(v)}: ${n} seat${n === 1 ? "" : "s"}\n${parts}`).tabIndex = 0;
+    cols.append(slot);
+    labels.append(el("div", "chart-label", axis(v)));
+  }
+  plot.append(cols);
+  card.append(plot, labels);
+  return card;
+}
+
+/** The y axis: a round top at or above `n`, and the gridline step (at most five steps above 0). */
+function yAxis(n: number): { top: number; step: number } {
+  let step = 1;
+  for (let k = 0; Math.ceil(n / step) > 5; k++) step = [2, 5, 10][k % 3]! * 10 ** Math.floor(k / 3);
+  return { top: step * Math.ceil(n / step), step };
+}
+
 /** Seats by status as one stacked bar, with a legend (status is never colour alone: icon + word). */
 function meter(t: AdminReport["totals"]): HTMLElement {
   const box = el("div", "meter-box");
@@ -169,10 +302,10 @@ function meter(t: AdminReport["totals"]): HTMLElement {
   return box;
 }
 
-function table(headers: string[], rows: string[][], cls: string[]): HTMLTableElement {
+function table(headers: string[], rows: string[][], cls: string[], tips: Record<string, string>): HTMLTableElement {
   const t = el("table", "games");
-  const head = el("tr");
-  headers.forEach((h, i) => head.append(el("th", cls[i] ?? "", h)));
+  const head = headRow(headers, tips);
+  [...head.cells].forEach((th, i) => { if (cls[i]) th.classList.add(cls[i]!); });
   t.append(head);
   for (const r of rows) {
     const tr = el("tr");

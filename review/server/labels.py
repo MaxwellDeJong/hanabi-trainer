@@ -163,14 +163,14 @@ class Store:
         A claimed seat is never handed out again (§4.4)."""
         labeller = labeller.strip()
         if not labeller:
-            raise LabelError("labeller name is required")
+            raise LabelError("labeler name is required")
         with _lock:
             claimed = self.claims()
             if game_id is None:
                 candidates = [(game_id, k) for game_id, b in self.labelable()
                               for k in range(_players(b)) if (game_id, k) not in claimed]
                 if not candidates:
-                    raise LabelError("no open seats left: every seat is being labelled or submitted", 409)
+                    raise LabelError("no open seats left: every seat is being labeled or submitted", 409)
                 game_id, seat = random.choice(candidates)
                 chosen_by = "random"
             else:
@@ -178,7 +178,7 @@ class Store:
                     raise LabelError("no such game", 404)
                 b = self.bundle(game_id)
                 if check_errors(b):
-                    raise LabelError("this game is not open for labelling", 409)
+                    raise LabelError("this game is not open for labeling", 409)
                 if not isinstance(seat, int) or not 0 <= seat < _players(b):
                     raise LabelError("no such seat")
                 if (game_id, seat) in claimed:
@@ -505,9 +505,14 @@ def admin_report(store):
                 totals["own_turns"] += n_own
                 totals["own_turns_submitted"] += n_own if st == "submitted" else 0
         totals["labelable_games"] += not errors
-        games.append({"id": game_id, "players": ex["players"],
-                      "variant": ex.get("options", {}).get("variant", "No Variant"), "turns": b["turns"],
-                      "errors": errors, "seats": seats})
+        final = b["positions"][-1]["board"]
+        options = ex.get("options", {})
+        games.append({"id": game_id, "players": ex["players"], "variant": options.get("variant", "No Variant"),
+                      "turns": b["turns"], "suits": len(final["stacks"]),
+                      # Cards played (the stacks' sum) in every mode, not the site's score, which All or
+                      # Nothing makes 0 for any game short of the maximum.
+                      "score": sum(final["stacks"].values()), "max_score": 5 * len(final["stacks"]),
+                      "bombs": final["strikes"], "errors": errors, "seats": seats})
 
     people = {}
     for r in rows.values():

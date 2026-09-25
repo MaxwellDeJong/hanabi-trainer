@@ -13,7 +13,7 @@ decisions made, proposals not yet decided, open questions and progress. The data
 Training happens outside this repo, in two phases:
 
 1. **Pretraining** on a very large corpus that trusts the moves players actually made.
-2. **Fine-tuning** on reviewed labels: high-trust moves chosen by labellers in the review tool.
+2. **Fine-tuning** on reviewed labels: high-trust moves chosen by labelers in the review tool.
 
 Most moves are good, but most games are lost (~96% of the group's 6-suit games score 0 under All or
 Nothing), often through misplays. Dropping lost games would throw away most of the data. So the
@@ -108,7 +108,7 @@ The last two look deliberate. The first may be a genuine mistake, which is a poo
 reason.
 
 - **The export doesn't say which misplays were deliberate.** Any detection has to be a heuristic, or
-  manual labelling of a sample of games.
+  manual labeling of a sample of games.
 - **The damage is probably concentrated at the end of a game.** The moves before a deliberate strikeout
   may be good labels, so drop the *run*, not the whole game.
 - `misplay_run_to_end` flags turns 10 and 11 of 78921, but not turn 8. None of the three is
@@ -150,7 +150,7 @@ Candidates for later filters, roughly from safest to riskiest. Each needs explor
 2. **Suspicious-move flags.** How to implement them (§4)? Options: descriptive facts only, a manual
    interpretation pass, or leave them to the reviewed fine-tuning set.
 3. **Detecting deliberate strikeouts.** Is `misplay_run_to_end` enough, and should it be checked against
-   hand-labelled games (§5.1)? Can a deliberate throw-away happen in some other way, such as a double
+   hand-labeled games (§5.1)? Can a deliberate throw-away happen in some other way, such as a double
    discard?
 4. **Genuine mistakes that aren't provable** (gambles, convention misreads): under D1 they stay in
    pretraining. Is that acceptable, or should reviewed labels also be used to find patterns in them?

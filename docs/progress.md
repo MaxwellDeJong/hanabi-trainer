@@ -19,10 +19,10 @@ both): 443 moves. `check` passes on all 12, and all 12 bundles match hanab.live'
 | **Game engine** | `hanabi_data/engine.py`, `rules.py` | Replays and validates GameRecords, full information or one player's view; every rule-based ending incl. All or Nothing, strikeout, surrender. Frozen against the retired prototype's output by `tests/data/golden_decisions.jsonl` (`meta` not compared); checked against hanab.live's reducer by `review/oracle/` |
 | **Downloader** | `hanabi_data/download.py` | Polite: one request at a time, 5 s + jitter, cached, refuses more than 20 missing exports, stops at the first problem. Used once, for the 10 games in `target_games.txt`. **Bulk download waits for the server owner's permission** |
 | **Move filtering** | `hanabi_data/filters.py`, `docs/label-filtering.md` | Two `candidate` filters (`play_clued_5_no_4`, `discard_clued_5_live`) and the `filters` report. None `agreed` yet, so `meta.filters` is always `[]`. On the 12 games: one catch (78922 turn 10, looks deliberate) |
-| **Review tool** | `review/` | **Inspect** (full bundle, any seat's view, checks, JSON; reached from the admin view) and **Label** (one seat per session, anonymised players, speedrun controls, moves apply at once, Tab hint, Backspace undo with replay, manual or auto-advance, the site's sounds, mismatch cue, Submit with fireworks). Several labellers: claims, board by game ID, 24-hour expiry, admin view. gzip for sharing through a tunnel. Label data in `review/labels/`: 5 submitted and 2 active sessions (test labellers), 76 labels |
+| **Review tool** | `review/` | **Inspect** (full bundle, any seat's view, checks, JSON; reached from the admin view) and **Label** (one seat per session, anonymised players, speedrun controls, moves apply at once, Tab hint, Backspace undo with replay, manual or auto-advance, the site's sounds, mismatch cue, Submit with fireworks). Several labelers: claims, board by game ID, 24-hour expiry, admin view. gzip for sharing through a tunnel. Label data in `review/labels/`: 5 submitted and 2 active sessions (test labelers), 76 labels |
 
 **Known gaps**
-- No sign-in: the labeller name is typed, and `#/admin` and Inspect are open to anyone who can reach the server.
+- No sign-in: the labeler name is typed, and `#/admin` and Inspect are open to anyone who can reach the server.
 - Labels in `review/labels/` are not committed and not in `.gitignore`: undecided.
 - No live capture yet of an `init` message, a successful `play`, 3–5 players or All or Nothing.
 - Surrender: no "… terminated the game!" log line; the admin view's Inspect list shows the board score,
@@ -35,14 +35,14 @@ both): 443 moves. `check` passes on all 12, and all 12 bundles match hanab.live'
 **Next**
 - Bulk download once permitted, then run `check` and the `filters` report on it.
 - Decide whether to agree the two candidate filters, and the next widening (`label-filtering.md` §7).
-- Share the review tool with a few labellers through a tunnel; decide on sign-in before hosting.
+- Share the review tool with a few labelers through a tunnel; decide on sign-in before hosting.
 - Capture another live game (All or Nothing, 3+ players, with an `init` message).
 
 ---
 
 ## 2026-09-25 · Label mode: replay after undo, pause, mismatch cue; UI check skill ✅
 
-Fixes and additions after labelling the new games:
+Fixes and additions after labeling the new games:
 
 | Change | Now |
 |---|---|
@@ -92,7 +92,7 @@ proposals, open questions and its own progress log.
 
 ## 2026-09-25 · Label mode: auto-advance, sounds, fireworks; expiry and an open board ✅
 
-Built with the several-labellers work below, and changes some of it:
+Built with the several-labelers work below, and changes some of it:
 
 | Change | Now |
 |---|---|
@@ -101,8 +101,8 @@ Built with the several-labellers work below, and changes some of it:
 | Sounds | Each newly revealed move plays the site's mp3 (from `vendor/`, unmodified). `bundle.py` picks it by hanab.live's `getSoundType.ts` rules into a new bundle field `sounds`: blind plays (1–6 in a row), misplays (1–2 in a row), "sad" when the max score drops, and the three endings; otherwise turn-us / turn-other. H-group and variant sounds left out, as with the site's defaults. Looking back is silent. `tests/test_review_sounds.py` (4 tests) |
 | Fireworks | A successful Submit shows fireworks in the game's suit colours and a thank-you for ~4.5 s (click or key skips; reduced motion: just the line), then returns to the lobby |
 | Expiry | A session not submitted within **24 hours** of its start expires: its events are deleted from `<game_id>.jsonl`, the session file keeps `expired`, reopening it answers 410, and the seat is open again. Checked whenever sessions are read. Submitted sessions never expire. Replaces the admin view's "stale after 3 days" flag |
-| Board by game ID | The board lists games by their real ID, newest first, with a search box, instead of an HMAC code (`secret.key` is gone). Labellers are trusted not to look games up. Turn counts and scores are still left out. Label mode shows it on the deck, as the site does |
-| Several seats per game | A labeller may take several seats of one game; a random start picks any unclaimed seat |
+| Board by game ID | The board lists games by their real ID, newest first, with a search box, instead of an HMAC code (`secret.key` is gone). Labelers are trusted not to look games up. Turn counts and scores are still left out. Label mode shows it on the deck, as the site does |
+| Several seats per game | A labeler may take several seats of one game; a random start picks any unclaimed seat |
 | Inspect moved | The lobby no longer lists games for Inspect; the admin view does, and Inspect's Lobby button returns there |
 | Tooltips | The lobby, Label mode and admin view explain themselves in hover tooltips (`tips.ts`) and "?" icons |
 
@@ -111,26 +111,26 @@ still loading). Design: `review-tool.md` §1, §4.1, §4.4.
 
 ---
 
-## 2026-09-25 · Review tool: several labellers (submit, claims, board, admin view) ✅
+## 2026-09-25 · Review tool: several labelers (submit, claims, board, admin view) ✅
 
-Getting ready for more than one labeller (`review-tool.md` §4.1, §4.4):
+Getting ready for more than one labeler (`review-tool.md` §4.1, §4.4):
 
 | Change | Now |
 |---|---|
-| Active vs submitted | A session is **active** until the labeller presses **Submit** at the end of the game. Submitting is refused while any own turn has no move (the tool jumps to it). Afterwards the session is read-only: moves, undo, hints and advancing return 409. New `submit` event; session field `submitted` |
-| Claims | A (game, seat) with any session is claimed. Random starts pick only unclaimed seats, in games the labeller has no seat in |
-| Board | The lobby lists every game open for labelling by an 8-character **code** (HMAC of the game ID with `review/labels/secret.key`, gitignored) and each seat as ○ take / ✎ in progress / ✓ submitted, with who's on it. "take" starts a session on that seat (`chosen_by: "picked"`). No game IDs, turn counts or scores |
+| Active vs submitted | A session is **active** until the labeler presses **Submit** at the end of the game. Submitting is refused while any own turn has no move (the tool jumps to it). Afterwards the session is read-only: moves, undo, hints and advancing return 409. New `submit` event; session field `submitted` |
+| Claims | A (game, seat) with any session is claimed. Random starts pick only unclaimed seats, in games the labeler has no seat in |
+| Board | The lobby lists every game open for labeling by an 8-character **code** (HMAC of the game ID with `review/labels/secret.key`, gitignored) and each seat as ○ take / ✎ in progress / ✓ submitted, with who's on it. "take" starts a session on that seat (`chosen_by: "picked"`). No game IDs, turn counts or scores |
 | Lobby | Your sessions split into active ("resume →", or "submit →" once the game is over) and submitted ("view") |
-| Admin view | `#/admin` (`GET /api/admin`): tiles and a status bar, one row per labeller (submitted/active, moves, hint use, after-undo labels, median time, last activity), every session (stale after 3 days idle) and coverage by game with IDs linking to Inspect |
+| Admin view | `#/admin` (`GET /api/admin`): tiles and a status bar, one row per labeler (submitted/active, moves, hint use, after-undo labels, median time, last activity), every session (stale after 3 days idle) and coverage by game with IDs linking to Inspect |
 
 `tests/test_review_labels.py` (6 tests; bundles built without the oracle) covers claims, picking, the
 one-seat-per-game rule, submitting (including after an undo) and read-only afterwards, the board hiding
 game IDs, and the admin totals. `python3 -m pytest`: 77 passed. Driven in headless Chrome on a copy of
-`review/labels/`: resume → Submit → read-only; lobby split; a second labeller took a seat from the board;
+`review/labels/`: resume → Submit → read-only; lobby split; a second labeler took a seat from the board;
 admin page counts match.
 
 *Since changed (same day, entry above):* the board lists games by ID with a search box (no HMAC codes or
-`secret.key`), a labeller may take several seats of one game, unsubmitted sessions expire after 24 hours
+`secret.key`), a labeler may take several seats of one game, unsubmitted sessions expire after 24 hours
 (replacing the "stale after 3 days" flag), and Inspect is reached from the admin view.
 
 **Existing data:** the sessions in `review/labels/` have no `submitted` field, so they count as active.
@@ -139,11 +139,11 @@ tester's sessions (7c8e94786969, 77db208ecc8f) have expired; the data now holds 
 seats (78663, 78916, 78852, 78822, 78738) and 2 active sessions.
 
 **Not done:**
-- No sign-in: the labeller name is typed, and `#/admin` and Inspect are open to anyone who can reach the
+- No sign-in: the labeler name is typed, and `#/admin` and Inspect are open to anyone who can reach the
   server. Fine locally; hosting needs sign-in and an admin role.
 - A stale active session keeps its seat claimed; there's no release/reassign yet (the admin view only
   flags it). *Since changed:* it expires after 24 hours and the seat opens again.
-- No way to hand one seat to two labellers on purpose (e.g. to measure agreement).
+- No way to hand one seat to two labelers on purpose (e.g. to measure agreement).
 
 ---
 
@@ -282,7 +282,7 @@ pilot download of ~50–100 exports to run `check` on (`representation.md` Q5, Q
 ## 2026-09-24 · Review tool: Label mode revised after first try ✅
 
 Changes asked for after trying phase 3, all done and tested in headless Chrome (a full seat of 78921
-labelled with one click per own turn, resumed partway through; undo, hint and animations checked):
+labeled with one click per own turn, resumed partway through; undo, hint and animations checked):
 
 | Change | Now |
 |---|---|
@@ -297,7 +297,7 @@ labelled with one click per own turn, resumed partway through; undo, hint and an
 `changed_after_reveal` is now **`after_reveal`**: the label was made after the game had gone past its
 turn. With moves applied at once, that's every label made after an undo. It used to be set only when a
 label replaced another, so a new label after an undo wasn't flagged. The two sessions already in
-`review/labels/` (labeller "tester") have the old field name; the server reads them as `after_reveal:
+`review/labels/` (labeler "tester") have the old field name; the server reads them as `after_reveal:
 false`. Their data wasn't rewritten.
 
 Bugs found while testing: `classList.add` with a space in the token threw and stopped the hands from
@@ -307,8 +307,8 @@ drawing; the label store now recreates its folders if they disappear.
 
 ## 2026-09-23 · Review tool, phase 3: Label mode ✅
 
-**Done when** a full seat of 78921 can be labelled and resumed. It can: driven in headless Chrome, a
-labeller was given seat 1 of 78921 at random, labelled turns 2–6, went back to the lobby, resumed at turn 6
+**Done when** a full seat of 78921 can be labeled and resumed. It can: driven in headless Chrome, a
+labeler was given seat 1 of 78921 at random, labeled turns 2–6, went back to the lobby, resumed at turn 6
 and finished the game. The events file has one label per turn with the right `choice`.
 
 ```bash
@@ -319,11 +319,11 @@ bash review/run.sh     # then open http://127.0.0.1:8765/, enter a name under "L
 
 | Piece | What it does |
 |---|---|
-| `review/server/labels.py` | Sessions and append-only label events (`review-tool.md` §8). Random (game, seat) from games the labeller has no session in and with no check errors. The **label view** is the bundle cut off at the frontier and redacted: anonymised names (`log_anon`), only this seat's views, only card identities the seat has seen, no game ID/seed/checks/decisions |
+| `review/server/labels.py` | Sessions and append-only label events (`review-tool.md` §8). Random (game, seat) from games the labeler has no session in and with no check errors. The **label view** is the bundle cut off at the frontier and redacted: anonymised names (`log_anon`), only this seat's views, only card identities the seat has seen, no game ID/seed/checks/decisions |
 | Rules enforced by the server | → is refused on your own turn until you label or skip; every label is checked against that turn's `legal`; hints only for your own turns already reached; `changed_after_reveal` when a label is replaced after the turn was passed or the hint shown |
 | `review/server/serve.py` | Session API (`review-tool.md` §7), keyed by session so the game ID never reaches the browser |
 | `review/web/src/label.ts` | Label mode on the same table as Inspect: speedrun clicks (left = play / colour clue, right = discard / rank clue), Shift + click = also OK, hover preview (what each click would do; L/R tags on the cards a clue would touch), H hint (site-style arrow: P/D for play/discard, clue arrows for clues), S skip, Backspace undo, T throw-away, N note, `?` help. The log marks your turns once passed: ✓ (same as the real move), ≈✓ (real move was in "also OK") or "you: …" |
-| Lobby | "Label" section: labeller name (remembered in the browser), start a session, resume unfinished ones. Sessions are listed without game IDs |
+| Lobby | "Label" section: labeler name (remembered in the browser), start a session, resume unfinished ones. Sessions are listed without game IDs |
 | `bundle.py` | Adds `log_anon` (log lines with Alice, Bob, … by seat) |
 
 ### Decisions made while building
@@ -331,7 +331,7 @@ bash review/run.sh     # then open http://127.0.0.1:8765/, enter a name under "L
 1. **Clicking a card doesn't advance.** It records the choice (a blue tag on the card); → reveals the real
    move. That's the flow in §4.1 and keeps changing your mind and undo before the reveal free of
    hindsight. Making the click advance straight away (more like the live game) is a small change in
-   `label.ts` if labelling feels slow.
+   `label.ts` if labeling feels slow.
 2. **Notes and the throw-away mark are their own events**, not fields on the label (they can be set on any
    turn). §8 updated.
 3. **The browser gets the label view on every call** (no incremental updates). It leaves out `history`
@@ -339,8 +339,8 @@ bash review/run.sh     # then open http://127.0.0.1:8765/, enter a name under "L
 
 ### Not done / known gaps
 
-- Undoing a label after the turn was passed leaves that turn unlabelled; the session can still be finished.
-  No count of unlabelled turns is shown.
+- Undoing a label after the turn was passed leaves that turn unlabeled; the session can still be finished.
+  No count of unlabeled turns is shown.
 - The site flashes the clue counter when you try to discard at 8 clues; we show a message instead.
 - No card notes or empathy (phase 5), no game browser (phase 4).
 - Labels live in `review/labels/` (not under `build/`, since they're not regenerable). Not in `.gitignore`;
