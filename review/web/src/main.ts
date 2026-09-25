@@ -110,15 +110,27 @@ function labelSection(): HTMLElement {
     "When the game is over, submit your moves. Each seat is labelled by one person, so pick an open one: " +
     "a random one with the button, or a specific one from the board below."));
   const row = el("div", "control-row");
-  const name = tip(el("input", "name-input"), "Your sessions are kept under this name. It's remembered in this browser");
+  const name = tip(el("input", "name-input labeller-input"), "Your sessions are kept under this name. It's remembered in this browser");
   name.placeholder = "Your name";
   name.value = loadName();
   const start = tip(el("button", "chip active", "Start a random open seat"),
     "Start labelling a seat nobody has taken yet, in a game chosen at random");
   const status = el("span", "hint");
-  row.append(el("span", "control-label", "Labeller"), name, start, status);
+  // Without a name, everything that starts a session is greyed out under a hatch (see .no-name in style.css)
+  // whose tooltip asks for one; clicking the hatch goes to the name field. The rest of the lobby works as usual.
+  const noName = (): void => { section.classList.toggle("no-name", name.value.trim() === ""); };
+  const needsName = (control: HTMLElement): HTMLElement => {
+    const hatch = tip(el("span", "hatch"), "Enter your name to get started.");
+    hatch.addEventListener("click", () => name.focus());
+    const wrap = el("span", "needs-name");
+    wrap.append(control, hatch);
+    return wrap;
+  };
+  row.append(el("span", "control-label", "Labeller"), name, needsName(start),
+    el("span", "name-prompt", "← Enter your name to start labelling"), status);
   const list = el("div");
   section.append(row, advanceRow(), list);
+  noName();
 
   const begin = async (pick?: { game_id: number; seat: number }): Promise<void> => {
     const who = name.value.trim();
@@ -138,17 +150,18 @@ function labelSection(): HTMLElement {
 
   const refresh = async (): Promise<void> => {
     const who = name.value.trim();
-    list.replaceChildren();
     status.textContent = "";
-    if (who === "") return;
+    // Without a name there are no sessions of yours, but the board still shows what's left to label.
     let sessions: SessionSummary[];
     let board: BoardGame[];
     try {
-      [sessions, board] = await Promise.all([listSessions(who), getBoard(who)]);
+      [sessions, board] = await Promise.all([who === "" ? [] : listSessions(who), getBoard(who)]);
     } catch (error) {
+      list.replaceChildren();
       status.textContent = String(error);
       return;
     }
+    list.replaceChildren();
     // Without a turn, Label mode opens at the furthest turn reached.
     const open = (id: string, turn?: number): void => { location.hash = `#/label/${id}${turn === undefined ? "" : `/${turn}`}`; };
     const active = sessions.filter((x) => x.status === "active");
@@ -174,8 +187,9 @@ function labelSection(): HTMLElement {
         onClick: () => open(x.session_id, 1),
       }))));
     }
-    list.append(boardSection(board, begin, open));
+    list.append(boardSection(board, begin, open, needsName));
   };
+  name.addEventListener("input", noName);
   name.addEventListener("change", () => { saveName(name.value.trim()); void refresh(); });
   start.addEventListener("click", () => void begin());
   void refresh();
@@ -234,7 +248,7 @@ const SEAT_WORD = { open: "open", active: "in progress", submitted: "submitted" 
 
 /** Every game with each seat's status, so labellers can see what's left and don't overlap. */
 function boardSection(board: BoardGame[], begin: (pick: { game_id: number; seat: number }) => Promise<void>,
-  open: (sid: string, turn?: number) => void): HTMLElement {
+  open: (sid: string, turn?: number) => void, needsName: (control: HTMLElement) => HTMLElement): HTMLElement {
   const box = el("div", "board");
   const seats = board.flatMap((g) => g.seats);
   const count = (st: string): number => seats.filter((x) => x.status === st).length;
@@ -286,7 +300,7 @@ function boardSection(board: BoardGame[], begin: (pick: { game_id: number; seat:
         } else if (x.available) {
           const b = tip(el("button", "chip", "○ take"), `Start labelling ${x.name}'s seat in game ${g.game_id}`);
           b.addEventListener("click", () => void begin({ game_id: g.game_id, seat: k }));
-          td.append(b);
+          td.append(needsName(b));
         } else {
           td.textContent = `${SEAT_ICON[x.status]} ${x.labellers.join(", ") || SEAT_WORD[x.status]}`;
           tip(td, x.status === "submitted" ? `Submitted by ${x.labellers.join(", ")}` : `Being labelled by ${x.labellers.join(", ")}`);
