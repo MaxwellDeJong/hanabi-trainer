@@ -28,7 +28,7 @@ and haven't started yet.*
  game export (JSON) ──► converter ─┐
                                    ├─► GameRecord ──► rules engine ──┬─► DecisionRecord per turn (JSON): the player's view + the move made
  live game (websocket) ─► converter ┘   event log       replays and    │
-                                        (stored)         validates      └─► Trajectory per (game, seat) (numpy): the model input (designed)
+                                        (stored)         validates      └─► Trajectory per (game, seat) (numpy): the model input
 ```
 
 1. **Collect games.** Game exports come from [new.playhanabi.com](https://new.playhanabi.com), a server
@@ -50,7 +50,7 @@ and haven't started yet.*
 6. **Review and label.** A browser tool that looks and plays like a live game on the site. A labeler sits
    in one seat of a recorded game and picks the best move at each of their turns. Labels feed
    fine-tuning; the full corpus of played moves feeds pretraining.
-7. **Build trajectories** *(designed, not built yet)*. The model input: one per (game, viewer seat), a
+7. **Build trajectories.** The model input: one per (game, viewer seat), a
    frame for every turn plus the action taken, as integer-coded numpy arrays. Token models (with their own
    vocabulary) and tensor models are both derived from it. See [`representation.md`](docs/representation.md) §8.
 

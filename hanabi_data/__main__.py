@@ -6,6 +6,8 @@
     python3 -m hanabi_data decisions game.json > decisions.jsonl
     python3 -m hanabi_data check game.json [...]
     python3 -m hanabi_data filters data/exports/*.json [...]           # moves the filters catch
+    python3 -m hanabi_data trajectory examples/export_78921.json --seat 1 --turn 4   # printout
+    python3 -m hanabi_data trajectories data/exports/*.json --out data/trajectories/hanabi-trajectory-v0
 
 Anything that takes a game accepts a GameRecord or a raw export.
 """
@@ -44,6 +46,14 @@ def main(argv=None) -> int:
     p.add_argument("--pretty", action="store_true")
     p = sub.add_parser("decisions", help="every decision record, one JSON per line")
     p.add_argument("game", type=Path)
+    p = sub.add_parser("trajectory", help="print one seat's trajectory, frame by frame")
+    p.add_argument("game", type=Path)
+    p.add_argument("--seat", type=int, help="whose view (default: the record's view; required for a full record)")
+    p.add_argument("--turn", type=int, help="only this UI turn's frame and step (1-based)")
+    p = sub.add_parser("trajectories", help="every seat's trajectory of every game -> .npz shards")
+    p.add_argument("games", type=Path, nargs="+", help="duplicate game IDs are read once")
+    p.add_argument("--out", type=Path, required=True, help="a new directory (refused if it has shards)")
+    p.add_argument("--per-shard", type=int, default=1000, help="trajectories per shard")
     p = sub.add_parser("check", help="validate GameRecords or exports")
     p.add_argument("games", type=Path, nargs="+")
     p = sub.add_parser("filters", help="every move the label filters catch, and totals per filter")
@@ -64,6 +74,15 @@ def main(argv=None) -> int:
         elif args.command == "decisions":
             for record in decisions(load_game(args.game)):
                 print(compact(record))
+        elif args.command == "trajectory":
+            from .trajectory import render, trajectory  # numpy is needed only here
+            traj = trajectory(load_game(args.game), args.seat)
+            turns = [args.turn - 1] if args.turn else range(traj.n_steps + 1)
+            if any(not 0 <= t <= traj.n_steps for t in turns):
+                raise ValueError(f"turn {args.turn} is outside 1..{traj.n_steps + 1}")
+            print("\n\n".join(render(traj, t) for t in turns))
+        elif args.command == "trajectories":
+            return write_trajectories(args.games, args.out, args.per_shard)
         elif args.command == "check":
             failed = 0
             for path in args.games:
@@ -76,7 +95,7 @@ def main(argv=None) -> int:
             return 1 if failed else 0
         elif args.command == "filters":
             report_filters(args.games)
-    except (InvalidGame, Unsupported, ValueError) as e:
+    except (InvalidGame, Unsupported, ValueError, FileExistsError) as e:
         print(f"error: {type(e).__name__}: {e}", file=sys.stderr)
         return 2
     return 0
@@ -105,6 +124,38 @@ def report_filters(paths) -> None:
         mine = [h for h in hits if f.name in h["filters"]]
         print(f"{f.name} ({f.status}): {len(mine)} moves in {len({h['game_id'] for h in mine})} games, "
               f"{sum(h['end_run'] for h in mine)} in a final misplay run")
+
+
+def write_trajectories(paths, out: Path, per_shard: int) -> int:
+    """Every seat of every full-information game (the view's seat of a player's-view record). A game
+    that doesn't convert is reported and skipped."""
+    from .trajectory import trajectory, write_shards
+
+    seen, failed, frames = set(), 0, 0
+
+    def trajs():
+        nonlocal failed, frames
+        for path in paths:
+            try:
+                record = load_game(path)
+                gid = record["source"]["game_id"]
+                if gid is not None and gid in seen:
+                    continue
+                seen.add(gid)
+                seats = range(len(record["players"])) if record.get("view") is None else [record["view"]]
+                built = [trajectory(record, s) for s in seats]
+            except (InvalidGame, Unsupported, ValueError) as e:
+                failed += 1
+                print(f"{path}: skipped: {type(e).__name__}: {e}", file=sys.stderr)
+                continue
+            for traj in built:
+                frames += traj.n_steps + 1
+                yield traj
+
+    count = write_shards(trajs(), out, per_shard)
+    print(f"{count} trajectories ({frames} frames) from {len(seen)} games -> {out}"
+          + (f"; {failed} skipped" if failed else ""))
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

@@ -8,15 +8,16 @@ Older entries are kept as written. Where the code has since changed, the entry h
 
 ---
 
-## Current state (checked against the code 2026-09-25)
+## Current state (checked against the code 2026-09-30)
 
-`python3 -m pytest`: **96 passed**. 12 games on hand (3 in `examples/`, 10 in `data/exports/`, 78921 in
+`python3 -m pytest`: **164 passed**. 12 games on hand (3 in `examples/`, 10 in `data/exports/`, 78921 in
 both): 443 moves. `check` passes on all 12, and all 12 bundles match hanab.live's reducer with 0 errors.
 
 | Area | Where | State |
 |---|---|---|
 | **Data model** | `hanabi_data/` (`record.py`, `convert_export.py`, `convert_live.py`, `decision.py`) | GameRecord (event log) from an export or a live websocket capture; DecisionRecord `hanabi-decision/v0` per turn from any seat's view, with `meta` (result, `label_effect`, misplay run fields, `seed`, `filters`). CLI: `convert-export`, `convert-live`, `decision`, `decisions`, `check`, `filters`. `listing` is always `null` (no `/history` parser), so `meta.datetime` is `null` |
 | **Game engine** | `hanabi_data/engine.py`, `rules.py` | Replays and validates GameRecords, full information or one player's view; every rule-based ending incl. All or Nothing, strikeout, surrender. Frozen against the retired prototype's output by `tests/data/golden_decisions.jsonl` (`meta` not compared); checked against hanab.live's reducer by `review/oracle/` |
+| **Trajectories** | `hanabi_data/trajectory.py`, `decision.views()` | `hanabi-trajectory/v0` (`representation.md` §8): one per (game, viewer seat), integer-coded numpy frames and steps, `.npz` shards + `index.jsonl`, `encode_move`/`decode_move` for every move format, `render`. CLI: `trajectory`, `trajectories`. Prefix, view and round-trip tests pass on all 12 games and the live captures. No vocabulary yet (Q14). numpy needed only for this module |
 | **Downloader** | `hanabi_data/download.py` | Polite: one request at a time, 5 s + jitter, cached, refuses more than 20 missing exports, stops at the first problem. Used once, for the 10 games in `target_games.txt`. **Bulk download waits for the server owner's permission** |
 | **Move filtering** | `hanabi_data/filters.py`, `docs/label-filtering.md` | Two `candidate` filters (`play_clued_5_no_4`, `discard_clued_5_live`) and the `filters` report. None `agreed` yet, so `meta.filters` is always `[]`. On the 12 games: one catch (78922 turn 10, looks deliberate) |
 | **Review tool** | `review/` | **Inspect** (full bundle, any seat's view, checks, JSON; reached from the admin view) and **Label** (one seat per session, anonymised players, speedrun controls, moves apply at once, Tab hint, Backspace undo with replay, manual or auto-advance, the site's sounds, mismatch cue, Submit with fireworks). Several labelers: claims, board by game ID, 24-hour expiry, admin view. gzip for sharing through a tunnel. Label data in `review/labels/`: 5 submitted and 2 active sessions (test labelers), 76 labels |
@@ -37,8 +38,37 @@ both): 443 moves. `check` passes on all 12, and all 12 bundles match hanab.live'
 - Decide whether to agree the two candidate filters, and the next widening (`label-filtering.md` §7).
 - Share the review tool with a few labelers through a tunnel; decide on sign-in before hosting.
 - Capture another live game (All or Nothing, 3+ players, with an `init` message).
-- Build the trajectory adapter (`representation.md` §8.8): `views()`, `hanabi_data/trajectory.py`, sharded
-  `.npz`, `render`, and the prefix, view and round-trip tests of §8.7. Install numpy on `compute`.
+- Install numpy on `compute` (only `trajectory.py` needs it; the review tool doesn't).
+- Later for trajectories: the token vocabulary (Q14) and the human-label file (`representation.md` §8.8).
+
+---
+
+## 2026-09-30 · Trajectory adapter built ✅
+
+`representation.md` §8.8's first implementation, validated on the 12 games on hand.
+
+| Piece | Now |
+|---|---|
+| `decision.views(record, viewer)` | Every position (T + 1) from one seat's view, in one replay |
+| `hanabi_data/trajectory.py` | `trajectory()` → a `Trajectory` (meta + frame and step arrays); `encode_frame`, `encode_step`, `encode_move` (GameRecord event, DecisionRecord label/legal entry, labeling-tool choice), `decode_move`, `decode_legal`, `decode_frame`, `render`, `write_shards`/`read_shards`/`load_shard`. Not imported by `__init__.py`, so the review tool still runs without numpy |
+| CLI | `trajectory GAME --seat S [--turn N]` (printout), `trajectories GAMES… --out DIR` (shards) |
+| `tests/test_trajectory.py` | 68 tests: shapes and padding, own cards never shown, round trip against every DecisionRecord (board, hands, `know`, ages, `status`, `unseen`, legal moves, label, `effect`), prefix (k = 0, 1, T/3, T/2, T − 1), player's view, the live captures of 78922 as a prefix of the export, moves in all three forms, shards, the §9 worked example, dead cards as `trash`. Runs on `examples/` plus `data/exports/` where present |
+
+Details settled while building (now in §8.2–8.5):
+- **Codes:** `NONE` = 255 (no card, padding, or not applicable) and `UNKNOWN` = 254. The proposal's separate
+  `EMPTY` code is `NONE`, and a step's `slot` is `NONE` rather than 0 for clues, so every "doesn't apply" is
+  the same code.
+- **`effect`** is filled for every step from the game summary, not only the viewer's (teammates' actions
+  are auxiliary targets). Bit 8 (`misplay_run_to_end`) knows the ending, so prefixes may differ there only.
+- **`encode_move` needs the view's absolute seat** for the two absolute forms: a DecisionRecord doesn't hold it.
+- **`actor`** comes from `meta` (names in relative order). In a finished game's last frame it is the seat
+  that would be next.
+- A DecisionRecord's `legal` lists clue targets by absolute seat; `decode_legal` gives them by relative
+  seat. Same moves, different order.
+- Found by the tests: a teammate's clue to the viewer has relative target 0, which `encode_move` first refused.
+
+**On the 12 games:** 31 trajectories, 1,190 frames, one 47 KB shard (307 B per frame before compression,
+about 40 B after). Building all 31 takes about 2 s.
 
 ---
 
