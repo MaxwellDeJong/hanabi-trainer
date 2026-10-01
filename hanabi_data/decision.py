@@ -3,6 +3,7 @@
     for d in decisions(record): ...           # one per action the record's view can act on
     decision_record(record, turn=4)           # one position (UI turn, 1-based), the actor's view
     decision_record(record, turn=4, viewer=1) # any seat's view of that position
+    for v in views(record, viewer=1): ...     # every position from one seat's view (trajectory.py)
 
 A decision record shows one position as one seat sees it. `label` (the move made) and `legal` are
 filled in only when that seat is the one to act.
@@ -49,6 +50,20 @@ def decisions(record: dict, summary: Optional[dict] = None) -> Iterator[dict]:
             break
         if record.get("view") is None or engine.active == record["view"]:
             yield build(record, engine, engine.active, action, summary)
+
+
+def views(record: dict, viewer: Optional[int] = None, summary: Optional[dict] = None) -> Iterator[dict]:
+    """Every position of the record from one seat's view, in a single replay: before each action, then
+    after the last one (T + 1 records). These are a trajectory's frames (representation.md §8.8).
+    `viewer` defaults to the record's view; a full-information record needs one."""
+    viewer = record.get("view") if viewer is None else viewer
+    if viewer is None:
+        raise ValueError("a full-information record needs a viewer seat")
+    if not 0 <= viewer < len(record["players"]):
+        raise ValueError(f"seat {viewer} with {len(record['players'])} players")
+    summary = summary or summarize(record)
+    for engine, action in positions(record):
+        yield build(record, engine, viewer, action, summary)
 
 
 def decision_record(record: dict, turn: int, viewer: Optional[int] = None) -> dict:
