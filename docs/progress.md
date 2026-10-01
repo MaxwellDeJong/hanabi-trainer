@@ -10,7 +10,7 @@ Older entries are kept as written. Where the code has since changed, the entry h
 
 ## Current state (checked against the code 2026-10-01)
 
-`python3 -m pytest`: **173 passed**. 12 games on hand (3 in `examples/`, 10 in `data/exports/`, 78921 in
+`python3 -m pytest`: **191 passed**. 12 games on hand (3 in `examples/`, 10 in `data/exports/`, 78921 in
 both): 443 moves. `check` passes on all 12, and all 12 bundles match hanab.live's reducer with 0 errors.
 
 | Area | Where | State |
@@ -19,7 +19,7 @@ both): 443 moves. `check` passes on all 12, and all 12 bundles match hanab.live'
 | **Listing and split** | `hanabi_data/listing.py`, `data/history/` | harikari.live's saved history page → `data/history/listing.jsonl` (25,412 rows; 13,975 in scope). `check` compares a game with its row. Train/valid/test split fixed by seed hash (`split_of`): 12,660 / 650 / 665 of the in-scope games. CLI: `listing` |
 | **Game engine** | `hanabi_data/engine.py`, `rules.py` | Replays and validates GameRecords, full information or one player's view; every rule-based ending incl. All or Nothing, strikeout, surrender. Frozen against the retired prototype's output by `tests/data/golden_decisions.jsonl` (`meta` not compared); checked against hanab.live's reducer by `review/oracle/` |
 | **Trajectories** | `hanabi_data/trajectory.py`, `decision.views()` | `hanabi-trajectory/v0` (`representation.md` §8): one per (game, viewer seat), integer-coded numpy frames and steps, `.npz` shards + `index.jsonl`, `encode_move`/`decode_move` for every move format, `render`. CLI: `trajectory`, `trajectories`. Prefix, view and round-trip tests pass on all 12 games and the live captures. No vocabulary yet (Q14). numpy needed only for this module |
-| **Downloader** | `hanabi_data/download.py` | Polite: one request at a time, 5 s + jitter, cached, refuses more than 20 missing exports, stops at the first problem. Used once, for the 10 games in `target_games.txt`. **Bulk download waits for the server owner's permission** |
+| **Downloader** | `hanabi_data/download.py` | Polite: one request at a time, oldest first, ≤0.5 request/s, cached and resumable, stops at the first problem, logs to `download_log.jsonl`. Bulk mode built: `--listing` targets (13,966 missing, ~8 h), a terms file required past 20 missing exports, UTC window, pilot runs (`--max-requests`). Used once, for the 10 games in `target_games.txt`. **Bulk download waits for the server owner's permission**: no terms file exists |
 | **Move filtering** | `hanabi_data/filters.py`, `docs/label-filtering.md` | Two `candidate` filters (`play_clued_5_no_4`, `discard_clued_5_live`) and the `filters` report. None `agreed` yet, so `meta.filters` is always `[]`. On the 12 games: one catch (78922 turn 10, looks deliberate) |
 | **Review tool** | `review/` | **Inspect** (full bundle, any seat's view, checks, JSON; reached from the admin view) and **Label** (one seat per session, anonymised players, speedrun controls, moves apply at once, Tab hint, Backspace undo with replay, manual or auto-advance, the site's sounds, mismatch cue, Submit with fireworks). Several labelers: claims, board by game ID, 24-hour expiry, admin view. gzip for sharing through a tunnel. Label data in `review/labels/`: 5 submitted and 2 active sessions (test labelers), 76 labels |
 
@@ -35,14 +35,43 @@ both): 443 moves. `check` passes on all 12, and all 12 bundles match hanab.live'
 - `review-tool.md` phase 5: card notes, empathy, prioritised sampling, hosting.
 
 **Next**
-- Bulk download once permitted, then run `check --listing` and the `filters` report on it. Until then: a bulk
-  mode for the downloader that takes its targets from the listing (`in_scope`), at the agreed rate and
-  User-Agent.
+- Once permitted: write `data/download_terms.json` (date, agreed rate and window), do a pilot run
+  (`--max-requests 100`) and `check --listing` it, then the full run; then the `filters` report.
 - Decide whether to agree the two candidate filters, and the next widening (`label-filtering.md` §7).
 - Share the review tool with a few labelers through a tunnel; decide on sign-in before hosting.
 - Capture another live game (All or Nothing, 3+ players, with an `init` message).
 - Install numpy on `compute` (only `trajectory.py` needs it; the review tool doesn't).
 - Later for trajectories: the token vocabulary (Q14) and the human-label file (`representation.md` §8.8).
+
+---
+
+## 2026-10-01 · Downloader: bulk mode, built and tested offline ✅
+
+Ready for the scripted download (option 1 of `message_to_server_owner.md`) once the owner agrees. **No
+request was sent**: the tests use fake fetches or a local HTTP server, and fail on any other connection.
+
+| Piece | Now |
+|---|---|
+| Order | **Oldest first** (ascending game ID), so an interrupted run leaves one contiguous done range. Resuming = the same command again (the cache skips what's there) |
+| Rate | `--rate`, default **0.5 request/s**, measured start to start (a slow reply adds no extra wait), plus up to 10% jitter on top, so the rate is a ceiling. A hard ceiling of 1.0/s. Replaces `--delay` |
+| Gate | More than 20 missing exports need `--terms FILE`: `approved` (a date, not in the future), optional `note`, `rate` (a ceiling for every run) and `window`; unknown keys are refused. Without it the run refuses before sending anything. With it the User-Agent is the one in the message: `hanabi_data/0.1.0 (bulk export download, one request at a time; contact: harikari.live)` |
+| Window | `window` in the terms and/or `--window`, UTC, may wrap past midnight. Outside it the run won't start; when it closes the run stops cleanly and says which ID is next |
+| Targets | `--listing FILE`: every `in_scope` game, and each export's players (sorted) and seed must match its row, or the run stops before saving it |
+| Pilot | `--max-requests N` sends at most N requests and stops; the next run continues |
+| Log | `download_log.jsonl` in the output folder: start (rate, window, User-Agent, terms), every save (bytes, seconds), errors, stops (window closed, interrupted), done |
+| Errors | As before: the first HTTP error, timeout or wrong reply stops the run, no retries; `Retry-After` is shown if sent. Ctrl-C is logged |
+| Tests | `tests/test_download.py`, 26 tests: order, rate and jitter bounds, slow replies, error and interrupt then resume, the gate, User-Agents, the terms' rate ceiling, window start/stop/resume and wrapping, pilot runs, the listing cross-check, terms validation, gzip, `Retry-After`, the CLI's dry runs, and an end-to-end run of the real HTTP code against a local server serving the example exports |
+
+**Dry run on harikari.live's listing:** 13,975 in scope, 9 cached (78663 isn't in this listing), **13,966 to
+fetch, IDs 11329–79136, about 8.1 hours at 0.5/s.** The message to the owner proposed 1/s and "roughly 4
+hours". With a 5-hour window (the group never plays 08:00–13:00 UTC, judging by a year of game end times)
+that's two sessions.
+
+```bash
+python3 -m hanabi_data.download --listing data/history/listing.jsonl --dry-run
+python3 -m hanabi_data.download --listing data/history/listing.jsonl --terms data/download_terms.json --max-requests 100
+python3 -m hanabi_data.download --listing data/history/listing.jsonl --terms data/download_terms.json
+```
 
 ---
 
@@ -288,6 +317,8 @@ python3 -m hanabi_data.download $(awk -F', ' 'NR>1{print $2}' target_games.txt)
 ```
 
 - One request at a time, 5 s apart plus up to 2.5 s of jitter (`--delay`, minimum 1 s). Gzip accepted.
+  *Since changed (2026-10-01):* `--rate` (default 0.5 request/s) replaced `--delay`, the order is oldest first,
+  and a bulk mode was added (entry of that date).
   The User-Agent names the tool and a contact (`--contact`, default `harikari.live`).
 - Exports go to `data/exports/export_<id>.json` unchanged, and a cached ID is never fetched again.
 - Refuses to start if more than 20 exports are missing (`--max-requests`).
