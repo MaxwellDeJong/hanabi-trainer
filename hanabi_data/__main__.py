@@ -8,6 +8,7 @@
     python3 -m hanabi_data filters data/exports/*.json [...]           # moves the filters catch
     python3 -m hanabi_data trajectory examples/export_78921.json --seat 1 --turn 4   # printout
     python3 -m hanabi_data trajectories data/exports/*.json --out data/trajectories/hanabi-trajectory-v0
+    python3 -m hanabi_data corpus data/exports --listing data/history/listing.jsonl --out data/corpus
     python3 -m hanabi_data listing data/history/*.html --out data/history/listing.jsonl
 
 Anything that takes a game accepts a GameRecord or a raw export, and `--listing FILE` (a listing .jsonl
@@ -58,6 +59,12 @@ def main(argv=None) -> int:
     p.add_argument("games", type=Path, nargs="+", help="duplicate game IDs are read once")
     p.add_argument("--out", type=Path, required=True, help="a new directory (refused if it has shards)")
     p.add_argument("--per-shard", type=int, default=1000, help="trajectories per shard")
+    p = sub.add_parser("corpus", help="check, split and convert every game -> trajectory shards per split",
+                       parents=[games])
+    p.add_argument("games", type=Path, nargs="+", help="game files or directories of them")
+    p.add_argument("--out", type=Path, required=True, help="a new directory")
+    p.add_argument("--jobs", type=int, help="worker processes (default: one per CPU)")
+    p.add_argument("--per-shard", type=int, default=1000, help="trajectories per shard")
     p = sub.add_parser("check", help="validate GameRecords or exports", parents=[games])
     p.add_argument("games", type=Path, nargs="+")
     p = sub.add_parser("filters", help="every move the label filters catch, and totals per filter", parents=[games])
@@ -97,6 +104,8 @@ def main(argv=None) -> int:
             print("\n\n".join(render(traj, t) for t in turns))
         elif args.command == "trajectories":
             return write_trajectories(args.games, args.out, args.per_shard, load)
+        elif args.command == "corpus":
+            return build_corpus(args.games, args.out, rows, args.jobs, args.per_shard)
         elif args.command == "check":
             failed = 0
             for path in args.games:
@@ -138,6 +147,19 @@ def report_filters(paths, load=load_game) -> None:
         mine = [h for h in hits if f.name in h["filters"]]
         print(f"{f.name} ({f.status}): {len(mine)} moves in {len({h['game_id'] for h in mine})} games, "
               f"{sum(h['end_run'] for h in mine)} in a final misplay run")
+
+
+def build_corpus(paths, out: Path, rows, jobs, per_shard: int) -> int:
+    """`corpus.build`, with its report printed. Fails if any game was left out for a reason other than
+    being a duplicate."""
+    import time
+    from .corpus import DUPLICATE, OK, build, report  # numpy is needed here too
+
+    start = time.monotonic()
+    manifest = build(paths, out, rows, jobs, per_shard)
+    print("\n".join(report(manifest, out)))
+    print(f"built in {time.monotonic() - start:.1f} s")
+    return 1 if any(r["status"] not in (OK, DUPLICATE) for r in manifest) else 0
 
 
 def write_trajectories(paths, out: Path, per_shard: int, load=load_game) -> int:

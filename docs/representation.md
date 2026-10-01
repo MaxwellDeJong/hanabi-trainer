@@ -607,6 +607,9 @@ data/trajectories/hanabi-trajectory-v0/          (derived, not committed; regene
   *Measured 2026-09-30:* 307 bytes per frame uncompressed; the 12 games on hand (31 trajectories, 1,190
   frames) make a 47 KB shard, about 40 bytes per frame.
 - **numpy is a dependency** of the package (`pyproject.toml`), and tests use it freely.
+- **The corpus** (`python3 -m hanabi_data corpus`, `corpus.py`, added 2026-10-01) is three such directories,
+  `train/`, `valid/` and `test/` (split by seed, §10), plus `games.jsonl` (each input file's status, split,
+  problems and filter catches) and `report.txt`. A game goes in only if it passes every §10 check.
 
 ### 8.6 Serializations (derived in the training code, not stored)
 
