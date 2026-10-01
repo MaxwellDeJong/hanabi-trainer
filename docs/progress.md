@@ -10,7 +10,7 @@ Older entries are kept as written. Where the code has since changed, the entry h
 
 ## Current state (checked against the code 2026-10-01)
 
-`python3 -m pytest`: **191 passed**. 12 games on hand (3 in `examples/`, 10 in `data/exports/`, 78921 in
+`python3 -m pytest`: **197 passed**. 12 games on hand (3 in `examples/`, 10 in `data/exports/`, 78921 in
 both): 443 moves. `check` passes on all 12, and all 12 bundles match hanab.live's reducer with 0 errors.
 
 | Area | Where | State |
@@ -19,6 +19,7 @@ both): 443 moves. `check` passes on all 12, and all 12 bundles match hanab.live'
 | **Listing and split** | `hanabi_data/listing.py`, `data/history/` | harikari.live's saved history page → `data/history/listing.jsonl` (25,412 rows; 13,975 in scope). `check` compares a game with its row. Train/valid/test split fixed by seed hash (`split_of`): 12,660 / 650 / 665 of the in-scope games. CLI: `listing` |
 | **Game engine** | `hanabi_data/engine.py`, `rules.py` | Replays and validates GameRecords, full information or one player's view; every rule-based ending incl. All or Nothing, strikeout, surrender. Frozen against the retired prototype's output by `tests/data/golden_decisions.jsonl` (`meta` not compared); checked against hanab.live's reducer by `review/oracle/` |
 | **Trajectories** | `hanabi_data/trajectory.py`, `decision.views()` | `hanabi-trajectory/v0` (`representation.md` §8): one per (game, viewer seat), integer-coded numpy frames and steps, `.npz` shards + `index.jsonl`, `encode_move`/`decode_move` for every move format, `render`. CLI: `trajectory`, `trajectories`. Prefix, view and round-trip tests pass on all 12 games and the live captures. No vocabulary yet (Q14). numpy needed only for this module |
+| **Corpus build** | `hanabi_data/corpus.py` | `corpus GAMES… --out DIR [--listing] [--jobs]`: every game checked, searched by the filters and split by seed; good games → shards in `train/`, `valid/`, `test/`; `games.jsonl` says why any file was left out; `report.txt`. Parallel and deterministic, no resume (rebuild instead). On the 12 games: 10 train, 2 valid, 0 test |
 | **Downloader** | `hanabi_data/download.py` | Polite: one request at a time, oldest first, ≤0.5 request/s, cached and resumable, stops at the first problem, logs to `download_log.jsonl`. Bulk mode built: `--listing` targets (13,966 missing, ~8 h), a terms file required past 20 missing exports, UTC window, pilot runs (`--max-requests`). Used once, for the 10 games in `target_games.txt`. **Bulk download waits for the server owner's permission**: no terms file exists |
 | **Move filtering** | `hanabi_data/filters.py`, `docs/label-filtering.md` | Two `candidate` filters (`play_clued_5_no_4`, `discard_clued_5_live`) and the `filters` report. None `agreed` yet, so `meta.filters` is always `[]`. On the 12 games: one catch (78922 turn 10, looks deliberate) |
 | **Review tool** | `review/` | **Inspect** (full bundle, any seat's view, checks, JSON; reached from the admin view) and **Label** (one seat per session, anonymised players, speedrun controls, moves apply at once, Tab hint, Backspace undo with replay, manual or auto-advance, the site's sounds, mismatch cue, Submit with fireworks). Several labelers: claims, board by game ID, 24-hour expiry, admin view. gzip for sharing through a tunnel. Label data in `review/labels/`: 5 submitted and 2 active sessions (test labelers), 76 labels |
@@ -35,13 +36,42 @@ both): 443 moves. `check` passes on all 12, and all 12 bundles match hanab.live'
 - `review-tool.md` phase 5: card notes, empathy, prioritised sampling, hosting.
 
 **Next**
+- While waiting for permission: work through **`while-waiting.md`** (open questions and code changes that
+  need no more data).
 - Once permitted: write `data/download_terms.json` (date, agreed rate and window), do a pilot run
-  (`--max-requests 100`) and `check --listing` it, then the full run; then the `filters` report.
+  (`--max-requests 100`) and `corpus --listing` it, then the full run and a fresh `corpus` build.
 - Decide whether to agree the two candidate filters, and the next widening (`label-filtering.md` §7).
 - Share the review tool with a few labelers through a tunnel; decide on sign-in before hosting.
 - Capture another live game (All or Nothing, 3+ players, with an `init` message).
 - Install numpy on `compute` (only `trajectory.py` needs it; the review tool doesn't).
 - Later for trajectories: the token vocabulary (Q14) and the human-label file (`representation.md` §8.8).
+
+---
+
+## 2026-10-01 · Corpus build command ✅
+
+`while-waiting.md` B1. One command from downloaded exports to training shards, so the day the download
+lands is `download`, then `corpus`. **No network**: it reads only local files.
+
+```bash
+python3 -m hanabi_data corpus data/exports --listing data/history/listing.jsonl --out data/corpus
+```
+
+| Piece | Now |
+|---|---|
+| Input | Game files and/or directories (their `*.json`), oldest first by the ID in the file name. Exports or GameRecords; `--listing` as for every other command |
+| Per game | Converted, `check_record` (with the listing row), every filter's catches (any status, for exploring), and the split from the export's seed. A game that passes goes in as one trajectory per seat |
+| Left out | Each file gets a status in `games.jsonl`: `duplicate` (game ID already read), `unsupported` (variant or option, a player's-view record, no seed), `invalid` (doesn't convert or replay; also not JSON), `failed check` (truncated, listing mismatch, …), `error` (an unexpected exception, i.e. a bug, so one build shows all of them). The build carries on either way. The exit code is 1 if anything other than a duplicate was left out |
+| Output | `<out>/train/`, `valid/`, `test/`: `hanabi-trajectory/v0` shard directories that `read_shards` reads; `games.jsonl`; `report.txt` (games, trajectories and frames per split, player counts, variants, endings, filter totals, the first 20 left out). Built in `<out>.partial` and renamed at the end; an existing `<out>` or leftover `.partial` is refused |
+| Speed | `--jobs` (default one per CPU). The output is identical whatever the job count. Measured on 1,200 renumbered copies of the games on hand: **23 s on 20 cores, ~100 MB**. So ~14k games is about 5 minutes, maybe 10 with longer games |
+| `trajectory.ShardWriter` | `write_shards` one trajectory at a time, so a build streams each split to disk instead of holding it |
+| Tests | `tests/test_corpus.py`, 6 tests: every kind of left-out file, a duplicate, the listing check, filter catches in the manifest, every good game's seats in its split's shards (equal to `trajectory()`), a serial and a parallel build identical, refusing existing or interrupted output, file order, the CLI |
+
+**Resume dropped** (the checklist proposed it): the whole build is minutes, so after another download
+session, build again into a new directory. The download itself still resumes.
+
+**On the 12 games:** 12 in (10 train, 2 valid, 0 test), 443 moves, 5 won; one filter catch (78922 turn 10).
+78663 has no listing row, so no datetime.
 
 ---
 

@@ -7,7 +7,7 @@ to the viewer throughout. Tokens and tensors are derived from these codes in the
     traj = trajectory(record, viewer=1)      # a full-information record: any seat
     traj = trajectory(live_record)           # a player's view: that seat, up to the current turn
     print(render(traj, 3))                   # frame 3 and step 3 (UI turn 4)
-    write_shards(trajs, out_dir); for traj in read_shards(out_dir): ...
+    write_shards(trajs, out_dir); for traj in read_shards(out_dir): ...   # or ShardWriter, one at a time
     encode_move(move, view, seat=)           # any of the repo's move formats -> factored fields
     decode_move(fields, view)                # factored fields -> a move in `legal` format
 
@@ -408,27 +408,42 @@ def render(traj: Trajectory, t: int) -> str:
 def write_shards(trajs: Iterable[Trajectory], out_dir: Union[str, Path], per_shard: int = 1000) -> int:
     """Write trajectories as `shard-NNNNN.npz` files plus `index.jsonl`. Refuses a directory that
     already has shards. Returns the number written."""
-    out = Path(out_dir)
-    out.mkdir(parents=True, exist_ok=True)
-    if (out / "index.jsonl").exists() or any(out.glob("shard-*.npz")):
-        raise FileExistsError(f"{out} already holds trajectories")
-    count, batch, index = 0, [], []
-
-    def flush():
-        name = f"shard-{len(index):05d}.npz"
-        _write_shard(out / name, batch)
-        index.append([{"shard": name, "row": i, **{k: tr.meta[k] for k in INDEX_FIELDS}} for i, tr in enumerate(batch)])
-        batch.clear()
-
+    writer = ShardWriter(out_dir, per_shard)
     for tr in trajs:
-        batch.append(tr)
-        count += 1
-        if len(batch) == per_shard:
-            flush()
-    if batch:
-        flush()
-    (out / "index.jsonl").write_text("".join(json.dumps(row) + "\n" for rows in index for row in rows))
-    return count
+        writer.add(tr)
+    return writer.close()
+
+
+class ShardWriter:
+    """`write_shards` one trajectory at a time: a shard is written every `per_shard` trajectories, and
+    `index.jsonl` at `close()`. Until then the directory isn't readable."""
+
+    def __init__(self, out_dir: Union[str, Path], per_shard: int = 1000):
+        self.out = Path(out_dir)
+        self.out.mkdir(parents=True, exist_ok=True)
+        if (self.out / "index.jsonl").exists() or any(self.out.glob("shard-*.npz")):
+            raise FileExistsError(f"{self.out} already holds trajectories")
+        self.per_shard, self.count, self._batch, self._index = per_shard, 0, [], []
+
+    def add(self, tr: Trajectory) -> None:
+        self._batch.append(tr)
+        self.count += 1
+        if len(self._batch) == self.per_shard:
+            self._flush()
+
+    def _flush(self) -> None:
+        name = f"shard-{len(self._index):05d}.npz"
+        _write_shard(self.out / name, self._batch)
+        self._index.append([{"shard": name, "row": i, **{k: tr.meta[k] for k in INDEX_FIELDS}}
+                            for i, tr in enumerate(self._batch)])
+        self._batch = []
+
+    def close(self) -> int:
+        """Write what's left and the index. Returns the number of trajectories written."""
+        if self._batch:
+            self._flush()
+        (self.out / "index.jsonl").write_text("".join(json.dumps(row) + "\n" for rows in self._index for row in rows))
+        return self.count
 
 
 def _write_shard(path: Path, trajs: List[Trajectory]) -> None:
