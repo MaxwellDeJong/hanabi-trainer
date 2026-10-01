@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Union
+from typing import Dict, Optional, Union
 
 SCHEMA = "hanabi-game/v0"
 SERVER = "new.playhanabi.com"
@@ -22,12 +22,14 @@ def player_view(record: dict, seat: int) -> dict:
     return {**record, "view": seat, "events": events}
 
 
-def load_game(path: Union[str, Path]) -> dict:
-    """A GameRecord file, or a raw export (converted on the fly)."""
+def load_game(path: Union[str, Path], listing: Optional[Dict[int, dict]] = None) -> dict:
+    """A GameRecord file, or a raw export (converted on the fly). `listing` (rows by game ID, from
+    `listing.load_listing`) fills in the record's `listing` if it has none."""
+    from .listing import attach
     doc = json.loads(Path(path).read_text())
     if is_game_record(doc):
-        return doc
+        return attach(doc, listing)
     if "schema" in doc:
         raise ValueError(f"{path}: unknown schema {doc['schema']!r}")
     from .convert_export import from_export
-    return from_export(doc)
+    return attach(from_export(doc), listing)

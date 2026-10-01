@@ -8,14 +8,15 @@ Older entries are kept as written. Where the code has since changed, the entry h
 
 ---
 
-## Current state (checked against the code 2026-09-30)
+## Current state (checked against the code 2026-10-01)
 
-`python3 -m pytest`: **164 passed**. 12 games on hand (3 in `examples/`, 10 in `data/exports/`, 78921 in
+`python3 -m pytest`: **173 passed**. 12 games on hand (3 in `examples/`, 10 in `data/exports/`, 78921 in
 both): 443 moves. `check` passes on all 12, and all 12 bundles match hanab.live's reducer with 0 errors.
 
 | Area | Where | State |
 |---|---|---|
-| **Data model** | `hanabi_data/` (`record.py`, `convert_export.py`, `convert_live.py`, `decision.py`) | GameRecord (event log) from an export or a live websocket capture; DecisionRecord `hanabi-decision/v0` per turn from any seat's view, with `meta` (result, `label_effect`, misplay run fields, `seed`, `filters`). CLI: `convert-export`, `convert-live`, `decision`, `decisions`, `check`, `filters`. `listing` is always `null` (no `/history` parser), so `meta.datetime` is `null` |
+| **Data model** | `hanabi_data/` (`record.py`, `convert_export.py`, `convert_live.py`, `decision.py`) | GameRecord (event log) from an export or a live websocket capture; DecisionRecord `hanabi-decision/v0` per turn from any seat's view, with `meta` (result, `label_effect`, misplay run fields, `seed`, `filters`). CLI: `convert-export`, `convert-live`, `decision`, `decisions`, `check`, `filters`, each with `--listing FILE` to fill in the game's `/history` row (and so `meta.datetime`) |
+| **Listing and split** | `hanabi_data/listing.py`, `data/history/` | harikari.live's saved history page → `data/history/listing.jsonl` (25,412 rows; 13,975 in scope). `check` compares a game with its row. Train/valid/test split fixed by seed hash (`split_of`): 12,660 / 650 / 665 of the in-scope games. CLI: `listing` |
 | **Game engine** | `hanabi_data/engine.py`, `rules.py` | Replays and validates GameRecords, full information or one player's view; every rule-based ending incl. All or Nothing, strikeout, surrender. Frozen against the retired prototype's output by `tests/data/golden_decisions.jsonl` (`meta` not compared); checked against hanab.live's reducer by `review/oracle/` |
 | **Trajectories** | `hanabi_data/trajectory.py`, `decision.views()` | `hanabi-trajectory/v0` (`representation.md` §8): one per (game, viewer seat), integer-coded numpy frames and steps, `.npz` shards + `index.jsonl`, `encode_move`/`decode_move` for every move format, `render`. CLI: `trajectory`, `trajectories`. Prefix, view and round-trip tests pass on all 12 games and the live captures. No vocabulary yet (Q14). numpy needed only for this module |
 | **Downloader** | `hanabi_data/download.py` | Polite: one request at a time, 5 s + jitter, cached, refuses more than 20 missing exports, stops at the first problem. Used once, for the 10 games in `target_games.txt`. **Bulk download waits for the server owner's permission** |
@@ -34,12 +35,42 @@ both): 443 moves. `check` passes on all 12, and all 12 bundles match hanab.live'
 - `review-tool.md` phase 5: card notes, empathy, prioritised sampling, hosting.
 
 **Next**
-- Bulk download once permitted, then run `check` and the `filters` report on it.
+- Bulk download once permitted, then run `check --listing` and the `filters` report on it. Until then: a bulk
+  mode for the downloader that takes its targets from the listing (`in_scope`), at the agreed rate and
+  User-Agent.
 - Decide whether to agree the two candidate filters, and the next widening (`label-filtering.md` §7).
 - Share the review tool with a few labelers through a tunnel; decide on sign-in before hosting.
 - Capture another live game (All or Nothing, 3+ players, with an `init` message).
 - Install numpy on `compute` (only `trajectory.py` needs it; the review tool doesn't).
 - Later for trajectories: the token vocabulary (Q14) and the human-label file (`representation.md` §8.8).
+
+---
+
+## 2026-10-01 · History listing parsed; split by seed fixed ✅
+
+The history page saved on 2026-09-30 (`data/history/harikari.live.html`) is now parsed by the package
+instead of a throwaway script, and every game command can attach a game's row.
+
+| Piece | Now |
+|---|---|
+| `hanabi_data/listing.py` | `parse_history` (refuses a row it can't read rather than skipping it), `merge` (several players' pages, one row per game ID; rows must agree, the larger "Other Scores" wins), `load_listing` (`.html` or `.jsonl`), `write_listing`, `in_scope`, `attach`, `summary`, `seed_bucket`/`split_of` |
+| Row | `game_id`, `num_players`, `score`, `variant`, `datetime` (end time, UTC, `…Z`), `players` (sorted by name: the page doesn't keep seat order), `seed`, `seed_games` |
+| `load_game(path, listing=)` | Fills in a record's `listing` if it has none. `meta.datetime` and the trajectory index's `datetime` follow |
+| `check` | Compares the listing with the record: score (as before), game ID, player count, players, variant, seed |
+| CLI | `listing PAGES… [--out FILE]` (rows + summary); `--listing FILE` on `convert-export` (now a listing file, not one row), `decision(s)`, `trajectory`/`trajectories`, `check`, `filters` |
+| `tests/test_listing.py` | 9 tests on `tests/data/history_sample.html` (four real rows: 78922, 78921, 78822 and a Brown game). Parsing, refusing bad rows, merge, file round trip, every listing check, `meta.datetime`, the split (with three seeds' buckets frozen), the CLI |
+
+**Findings:**
+- The parser agrees with the 2026-09-30 throwaway parse on all 25,412 rows. All 11 of the 12 games on hand
+  that are listed pass the listing checks. 78663 isn't in harikari.live's history, so it has no row.
+- **"Other Scores" counts this game too**: it's never below 1. `representation.md` §3.1 said "other games".
+- **Q12:** none of the 13,975 in-scope games share a seed with each other. 6,105 (44%) are on a seed that
+  other tables have also played, so repeats come only from adding other players' histories.
+- **Q2:** in-scope games per year: 2021 5 · 2022 4,124 · 2023 1,681 · 2024 1,887 · 2025 2,657 · 2026 3,621.
+- **Split:** buckets 0–4 `test`, 5–9 `valid`, 10–99 `train`, from a salted SHA-256 of the seed. It's
+  computed wherever needed, not stored. In scope: test 665 · valid 650 · train 12,660.
+
+`data/history/harikari.live.rows.json` (the throwaway parse) is superseded by `listing.jsonl`, but kept.
 
 ---
 
@@ -353,7 +384,8 @@ python3 -m pytest
 ### Not done / known gaps
 
 - `listing` is always `null`: the `/history` page parser doesn't exist yet, so `meta.datetime` is `null`
-  and the score check against the listing is skipped.
+  and the score check against the listing is skipped. *Since changed (2026-10-01):* `listing.py` parses
+  saved history pages, and every game command takes `--listing`.
 - The `init` message is parsed from the server source's shape; no real capture of one yet.
 - Live streams with a successful `play`, 3–5 players or All or Nothing are still uncaptured (§3.4).
 

@@ -30,11 +30,27 @@ def check_record(record: dict) -> List[str]:
         from .convert_export import from_export
         if from_export(record["raw"])["events"] != record["events"]:
             problems.append("events differ from a fresh conversion of raw")
-        listing = record.get("listing") or {}
-        if "score" in listing and summary["final_score"] is not None and listing["score"] != summary["final_score"]:
-            problems.append(f"final score {summary['final_score']}, the history page says {listing['score']}")
+        problems += _check_listing(record, summary)
     elif kind == "live":
         problems += check_stream(record)
     else:
         problems.append(f"unknown source kind {kind!r}")
+    return problems
+
+
+def _check_listing(record: dict, summary: dict) -> List[str]:
+    """The history page agrees with the export. Only the fields the listing has are compared."""
+    listing, problems = record.get("listing") or {}, []
+    expected = {
+        "game_id": record["source"]["game_id"],
+        "score": summary["final_score"],
+        "num_players": len(record["players"]),
+        "players": sorted(record["players"]),
+        "variant": record["options"]["variant"],
+        "seed": (record.get("raw") or {}).get("seed"),
+    }
+    for key, value in expected.items():
+        if key in listing and value is not None and listing[key] != value:
+            what = "final score" if key == "score" else key
+            problems.append(f"{what} {value}, the history page says {listing[key]}")
     return problems
