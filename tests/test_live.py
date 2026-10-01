@@ -39,7 +39,7 @@ def test_unhidden_final_capture_is_the_export(export_record):
 
 @pytest.mark.parametrize("name, turns", [("deal", [1]), ("turn3", [1, 3]), ("turn10", [1, 3, 5, 7, 9])])
 def test_players_view_matches_export(export_record, name, turns):
-    """§6/§9: seat 0's decision records from the stream equal those from the export, apart from
+    """§6/§10: seat 0's decision records from the stream equal those from the export, apart from
     `private` and `meta`. The last one is the live decision (seat 0 to act, no label yet) where the
     capture allows it."""
     full = {d["key"]["turn"]: d for d in decisions(export_record)}

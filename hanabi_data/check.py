@@ -1,4 +1,4 @@
-"""Checks for a stored GameRecord (docs/representation.md §9). Every check returns a list of
+"""Checks for a stored GameRecord (docs/representation.md §10). Every check returns a list of
 problems; an empty list means the record passed."""
 from __future__ import annotations
 

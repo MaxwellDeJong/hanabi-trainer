@@ -12,9 +12,10 @@ and haven't started yet.*
 - **Learn a group's conventions from their games, not from hand-written rules.** The group plays with one
   shared (and slowly changing) set of conventions. No convention is hardcoded here: the model gets the
   full game history plus facts that follow from the rules, and has to learn the rest.
-- **Decide from the current state alone.** Every training example is a single decision: everything the
-  acting player could know at that moment, plus the move they made. It is rich enough to choose a move
-  from without any other context.
+- **Decide from the current state alone.** The input for a decision is everything the acting player
+  could know at that moment, and the move they made is its label. That input is rich enough to choose a
+  move from without any other context. Models are trained from scratch on whole games seen from one seat
+  (trajectories), with a frame for every turn, so one pass covers all of that seat's decisions.
 - **Use the same input in training and in live play.** Recorded games and live games go through the same
   format and the same rules engine, so the model sees the same kind of input in both.
 - **Keep labels trustworthy.** Most games under All or Nothing are lost, often through a misplay, but most
@@ -25,9 +26,9 @@ and haven't started yet.*
 
 ```
  game export (JSON) ──► converter ─┐
-                                   ├─► GameRecord ──► rules engine ──► DecisionRecord per turn ──► model format
- live game (websocket) ─► converter ┘   event log       replays and       the player's view +          (later)
-                                        (stored)         validates         the move made (the label)
+                                   ├─► GameRecord ──► rules engine ──┬─► DecisionRecord per turn (JSON): the player's view + the move made
+ live game (websocket) ─► converter ┘   event log       replays and    │
+                                        (stored)         validates      └─► Trajectory per (game, seat) (numpy): the model input (designed)
 ```
 
 1. **Collect games.** Game exports come from [new.playhanabi.com](https://new.playhanabi.com), a server
@@ -49,14 +50,17 @@ and haven't started yet.*
 6. **Review and label.** A browser tool that looks and plays like a live game on the site. A labeler sits
    in one seat of a recorded game and picks the best move at each of their turns. Labels feed
    fine-tuning; the full corpus of played moves feeds pretraining.
+7. **Build trajectories** *(designed, not built yet)*. The model input: one per (game, viewer seat), a
+   frame for every turn plus the action taken, as integer-coded numpy arrays. Token models (with their own
+   vocabulary) and tensor models are both derived from it. See [`representation.md`](docs/representation.md) §8.
 
-Out of scope for this repo: the model format, training, and the live client that plays games.
+Out of scope for this repo: the models, training, and the live client that plays games.
 
 ## Repository layout
 
 | Path | What it is |
 |---|---|
-| `hanabi_data/` | Python package: converters, rules engine, decision records, label filters, downloader. Python 3.9+, standard library only |
+| `hanabi_data/` | Python package: converters, rules engine, decision records, label filters, downloader. Python 3.9+ and numpy |
 | `review/` | The review and labeling tool: a local Python server and a TypeScript/Vite web app. See [`review/README.md`](review/README.md) |
 | `docs/` | Design documents: [`representation.md`](docs/representation.md) (data format and rules), [`review-tool.md`](docs/review-tool.md), [`label-filtering.md`](docs/label-filtering.md) |
 | `examples/` | Real game exports and live captures used by the tests and docs. See [`examples/README.md`](examples/README.md) |

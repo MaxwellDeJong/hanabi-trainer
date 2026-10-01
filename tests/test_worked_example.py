@@ -1,4 +1,4 @@
-"""docs/representation.md §8 is generated, not hand-written: the CLI output, the example file and
+"""docs/representation.md §9 is generated, not hand-written: the CLI output, the example file and
 the document agree."""
 import json
 import re

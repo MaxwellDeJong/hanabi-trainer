@@ -1,12 +1,13 @@
 # Hanabi decision representation: design v0 (draft)
 
 *Status: draft for discussion · 2026-09-23 (updated the same day: live websocket stream, event-log GameRecord;
-engine implemented in `hanabi_data/`, see §5.1)*
+engine implemented in `hanabi_data/`, see §5.1) · 2026-09-26: model input format decided (§8, not built yet)*
 
-This document defines how a recorded Hanabi game becomes training examples. Each example is one decision:
+This document defines how a recorded Hanabi game becomes training examples. Each decision is
 everything the acting player could know at that moment, plus the move they actually made. The goal is
 an input rich enough to choose the best move from it alone (a Markovian state), without hardcoding any
-conventions.
+conventions. Models train on whole games seen from one seat (trajectories, §8). The input for one decision
+is a prefix of such a trajectory.
 
 ---
 
@@ -20,11 +21,14 @@ conventions.
 - A deterministic **rules engine** that replays a game record turn by turn.
 - A **decision record**: one per turn, seen from the acting player's point of view, with the move
   actually made (the label) and metadata for filtering.
+- A **trajectory**: the model input. It covers a whole game seen from one seat, with a frame for every
+  turn, stored as integer-coded numpy arrays (§8).
 
-All four are implemented in the `hanabi_data/` package (§5.1).
+The first four are implemented in the `hanabi_data/` package (§5.1). The trajectory is designed but not
+built yet.
 
 **Deferred**
-- The compact format the model reads, and the token budget (see Q3).
+- Models and training (a separate repo). They turn trajectories into tokens or tensors (§8.6).
 - Label filtering policy (see Q1).
 - The live client: connecting to the websocket, and sending moves (a separate repo, later; see Q11).
 - Screenshot parsing: now only a fallback, since the websocket stream gives the game state as JSON.
@@ -47,7 +51,11 @@ All four are implemented in the `hanabi_data/` package (§5.1).
 | Conventions | One shared set within the group, changing over time. **Not** hardcoded; the model learns them from history |
 | Hand-off format | An **event log** GameRecord (§6). Exports and live streams both convert into it. Unknown identities are `null`, and every clue stores the cards it touched |
 | Live game state | Read from the game's **websocket stream** as the seated player receives it (§3.4), not from screenshots |
-| Formats | Verbose JSON for storage (this doc); a compact format for the model, derived from it later |
+| Formats | Verbose JSON for game records and decision records (§6, §7). The model reads **trajectories** (§8), which are derived from game records |
+| Models (2026-09-26) | **Trained from scratch.** This covers sequence models with their own vocabulary (not a pretrained LLM's tokenizer) as well as recurrent and other tensor models. Feeding the text rendering to an off-the-shelf LLM is a side experiment, not the main effort |
+| Model input (2026-09-26) | One **trajectory** per (game, viewer seat), with a **frame for every turn**, whoever acts, plus the action taken at each turn (§8). Token and tensor models both read it |
+| Numeric storage (2026-09-26) | **numpy**. Trajectories are stored as integer-coded arrays (§8.5). Converting them to torch tensors is left to the training code. numpy is a dependency of `hanabi_data` and may be used freely, tests included |
+| JSON → arrays (2026-09-26) | An **adapter** (§8.8) translates the structured JSON records (exported games through their DecisionRecords, and the labeling tool's labels) into the dense arrays, and model outputs back into moves |
 | Code | The schema, converters, engine and decision records are one Python package, `hanabi_data/`, in this repo (provisional answer to Q9) |
 | Raw data | Exports are cached in `data/exports/export_<id>.json`, unchanged. **Not committed** (`.gitignore`); they can be downloaded again |
 
@@ -71,6 +79,10 @@ All four are implemented in the `hanabi_data/` package (§5.1).
   old game.
 - **No rate-limit headers and no `robots.txt`.** It's a small nginx server, so collection must be throttled
   (about 1 request per second, one connection) and cached permanently, since finished games never change.
+- **harikari.live's history (fetched once, 2026-09-30; saved in `data/history/`):** 25,412 games, IDs 2447 (2021-09-17)
+  to 79136 (2026-09-28). Target set (6 Suits or No Variant, 2–5 players): **13,975** exports: 6 Suits 11,405
+  (2p 3,652 · 3p 5,794 · 4p 1,760 · 5p 199), No Variant 2,570. The page's time is the end time only; the median gap
+  between consecutive games is 30 s, so most deals are abandoned quickly.
 - **pour1out4bga's 6-suit games:** 2p 2,432 · 3p 5,070 · 4p 1,788 · 5p 199. Of these, 9,084 score 0 and
   285 score 30.
 
@@ -180,7 +192,7 @@ consequences:
 
 Bulk downloading waits for permission (§1), so these 10 games were picked to cover the common cases.
 `hanabi_data/download.py` fetched them politely: one request at a time, ≥5 s apart, cached, stopping at the
-first error. All 10 pass `check` and match hanab.live's reducer (§9).
+first error. All 10 pass `check` and match hanab.live's reducer (§10).
 
 | Game | Players | Suits | Options besides timers | How it ends (engine) |
 |---|---|---|---|---|
@@ -199,7 +211,7 @@ first error. All 10 pass `check` and match hanab.live's reducer (§9).
 ## 4. Rules the engine implements
 
 The reference is the hanab.live source (`Hanabi-Live/hanabi-live`, commit `c1d970b`, 2026-09-18). **We
-don't know which version new.playhanabi.com runs**, so replay checks (§9) have to confirm that it behaves
+don't know which version new.playhanabi.com runs**, so replay checks (§10) have to confirm that it behaves
 the same way.
 
 | Rule | Value | Source |
@@ -235,15 +247,16 @@ variant other than "No Variant" and "6 Suits", and the options `cardCycle`, `dec
 ## 5. Architecture
 
 ```
- export JSON ──► converter ─┐
-                            ├─►  GameRecord  ──►  Engine (deterministic replay)  ──►  DecisionRecord × turns  ──►  model serializer(s)
- live stream ──► converter ─┘    event log;       knows the rules; rejects                derived, versioned;         deferred
- (websocket,                     stored, the      invalid games                           regenerated from records
-  player's view)                 source of truth
+ export JSON ──► converter ─┐                                                      ┌─►  DecisionRecord × turns     (JSON; review tool, filters, inspection)
+                            ├─►  GameRecord  ──►  Engine (deterministic replay)  ──┤
+ live stream ──► converter ─┘    event log;       knows the rules; rejects         └─►  Trajectory × viewer seats  ──►  tokens / tensors
+ (websocket,                     stored, the      invalid games                         integer-coded numpy (§8);        in the training code
+  player's view)                 source of truth                                        derived, versioned, cached
 ```
 
-- **Store only game records.** Decision records are derived from them. Regenerating them after a schema
-  change needs no downloading.
+- **Store only game records.** Decision records and trajectories are derived from them. Regenerating them
+  after a schema change needs no downloading. Trajectories are also cached on disk (§8.5), because
+  replaying every game in Python each epoch would be too slow.
 - **One engine for both paths.** Training (exports, full information) and live play (the stream, the
   player's view) go through the same GameRecord and the same engine. So the model sees exactly the same
   kind of input in both.
@@ -256,12 +269,13 @@ variant other than "No Variant" and "6 Suits", and the options `cardCycle`, `dec
 | `rules.py` | §4 constants, `Rules` (from the site's options or a GameRecord's), `Unsupported`, `InvalidGame` |
 | `engine.py` | `Engine.apply(event)` replays a GameRecord event by event and raises `InvalidGame` on anything the rules don't allow. It works with unknown identities (a player's view) and checks everything that view can see. `positions(record)` stops before every action |
 | `convert_export.py` | `from_export(export, listing=, fetched_at=)`. Runs the engine while building the events, so it fills in `touched`, misplays and rule-based endings |
-| `convert_live.py` | `parse_capture(text)`, `from_live(messages)`, `check_stream(record)` (§9) |
+| `convert_live.py` | `parse_capture(text)`, `from_live(messages)`, `check_stream(record)` (§10) |
 | `decision.py` | `decisions(record)`, `decision_record(record, turn, viewer=)`, `summarize(record)` |
-| `check.py` | `check_record(record)`: the §9 checks |
+| `check.py` | `check_record(record)`: the §10 checks |
 | `filters.py` | Label filters for the pretraining corpus (`label-filtering.md`): `FILTERS` with their status, `fired(engine, action)`, `firings(record, summary)` |
 | `record.py` | `load_game(path)` (a GameRecord or a raw export), `player_view(record, seat)` |
 | `download.py` | `download(ids, out_dir)`: polite fetching of `/export/<id>` into a permanent cache (one request at a time, ≥5 s apart by default, a cap per run, stops at the first error). For small hand-picked samples until bulk collection is approved |
+| `trajectory.py` | *Planned (§8.8).* The adapter: per-turn DecisionRecords (and labeling-tool moves) → integer-coded trajectories per viewer seat, sharded `.npz` files, a text printout; later the reference vocabulary |
 
 ```bash
 python3 -m hanabi_data decision examples/export_78921.json 4 --pretty   # UI turn 4
@@ -273,7 +287,8 @@ python3 -m hanabi_data filters data/exports/*.json                              
 python3 -m pytest                                                                  # tests/
 ```
 
-Python 3.9, standard library only. The review tool (`review/server/bundle.py`) uses the same package, so
+Python 3.9. numpy is the one dependency (since 2026-09-26, for trajectories), and may be used freely,
+tests included. The review tool (`review/server/bundle.py`) uses the same package, so
 hanab.live's reducer checks the engine on every position of every bundled game.
 
 ---
@@ -355,7 +370,7 @@ Game 78922 as a full-information record, abridged:
 A full-information record can produce decision records for **every** seat. A player's-view record can
 produce them only for that player, and only up to the current turn. For a game with both, the decision
 records for that player must come out identical, apart from `private` and `meta`. That makes a direct test
-of the live path (§9).
+of the live path (§10).
 
 ---
 
@@ -434,7 +449,224 @@ no label.
 | `filters` | The **agreed** label filters (`label-filtering.md` §3) that catch this move; `[]` if none | Drop provably bad labels from pretraining |
 | `raw_action` | The export's action for this move | Trace back to the export |
 
-## 8. Worked example: game 78921, turn 4 (screenshot 1)
+---
+
+## 8. Layer 3: Trajectory (model input)
+
+*Decided 2026-09-26; not built yet. The field list below is the proposal to build from. Vocabulary
+details are open (Q14).*
+
+This is what models train on. The decisions behind it (§2):
+- **Models are trained from scratch.** Sequence models get their own vocabulary rather than an existing
+  LLM's tokenizer. Recurrent and other tensor models read the same data. An off-the-shelf LLM may be tried
+  on the text rendering (§8.6) as a side experiment.
+- **One stored format serves every kind of model.** A frame is a fixed set of small categorical fields,
+  stored as integer codes. Token IDs and one-hot or embedded tensors are both derived from those codes at
+  training time (§8.6). The codes are stored; the model's view of them is not.
+- **A frame for every turn**, whoever acts, not just the viewer's turns. Teammates' moves are the main
+  source of information in Hanabi.
+- **numpy for storage** (§8.5). The training code converts to torch.
+
+### 8.1 Unit: one trajectory per (game, viewer seat)
+
+A trajectory is a whole game as one seat saw it, step by step:
+
+| Array | Length | Contents |
+|---|---|---|
+| frames | T + 1 | Frame *t* is the position before action *t*, as the viewer saw it at that moment. The last frame is the position after the last action, or the current position in a live game |
+| steps | T | Step *t* is action *t* (UI turn *t* + 1), whoever made it, as the viewer saw it: the action fields (§8.3) plus labels and targets (§8.4) |
+
+- **Where trajectories come from.** A full-information GameRecord gives one trajectory per seat. A
+  player's-view record gives only that seat's, up to the current turn.
+- **How decisions are read off it.** The input for the viewer's decision at step *t* is frames 0..*t* plus
+  steps 0..*t*−1. That is the same information as that turn's DecisionRecord, so the Markovian goal still
+  holds. A causal model gets every one of the viewer's decisions in one pass over the trajectory. Separate
+  decision records would repeat the history once per decision.
+- **Frames and actions are both needed.** The difference between two frames doesn't always show what
+  happened. For example, a clue that touches only cards the holder already fully knows changes no `know`
+  field. Conventions also depend on who gave a clue and which cards it touched and missed.
+- **Seats are relative to the viewer**, and stay that way for the whole trajectory: seat 0 = the viewer,
+  seat 1 = the next player, and so on. (A DecisionRecord makes seats relative to the actor, but at the
+  viewer's own decisions the two are the same.)
+
+### 8.2 Frame fields
+
+Everything is padded to 5 seats × 5 slots × 6 suits. Every field fits in `uint8`, except `pace`. Unused
+seats, slots and suits get fixed codes, and `n_players` and `n_suits` give the masks.
+
+| Group | Field | Shape | Values |
+|---|---|---|---|
+| Board | `actor` | — | Relative seat to act |
+| | `score`, `clues`, `strikes`, `deck` | — | As in `obs.board`; `deck` = cards left |
+| | `stacks` | [6] | Top rank per suit, 0–5 |
+| | `discards` | [6, 5] | Copies of each (suit, rank) in the discard pile, misplays included, 0–3. The order is in the steps |
+| | `pace` | — | `int8`, as in `obs.board`. `−128` = none (the deck is empty). Q4 |
+| Each slot, [5 seats, 5 slots] in UI order (slot 1 = newest) | `suit`, `rank` | [5, 5] | The identity the viewer sees. Codes: `EMPTY` (no card in that slot, e.g. a hand shrinking under All or Nothing), `UNKNOWN` (the viewer's own cards, **always**), else the suit index / rank |
+| | `know_suits`, `know_ranks` | [5, 5] | The holder's clue-only knowledge (`know`, §7.2) as bitmasks: 6 bits of suits, 5 bits of ranks. **Kept for every seat**, because what teammates know about their own cards matters as much as the cards |
+| | `touches` | [5, 5] | How many clues have touched the card, capped at 7 |
+| | `age` | [5, 5] | Turns since the card was drawn (*t* − `drawn_t`) |
+| | `touch_age` | [5, 5] | Turns since a clue last touched the card; 255 = never |
+| | `card` | [5, 5] | Deck index (§7.1). Public, since draws are in deck order. It lets frames be joined to steps and to the GameRecord. Not meant as model input |
+| Derived (rules only) | `status` | [5, 5] | `playable` / `critical` / `trash` bits for cards the viewer sees; 0 for own cards. Exact, because the viewer sees these cards. The bits come from the card's **true identity, not from the holder's clue knowledge**: a teammate's B3 whose twin is discarded is `critical` even if its holder only knows "a 3". So for now they apply **only to teammates' hands**. Bits computed from clue knowledge, which would also cover the viewer's own cards, are a candidate under Q6. **`trash` = can never be played**: already played, or dead (a lower rank of its suit has every copy discarded). `critical` is never set on a trash card. This fixes Q13 for trajectories; DecisionRecords keep their narrower `trash` |
+| | `unseen` | [6, 5] | As `obs.unseen` |
+
+The derived fields follow from the other fields and the rules, so no convention creeps in (§7.1 principle
+5). They're stored because they're cheap. Each model format decides whether it uses them.
+
+Suit and rank are stored **as separate fields**, not as one `"G3"` code. A single card token is easy to
+build from them (§8.6), and a suit permutation (augmentation, Q7) is then just one lookup table applied to
+`suit`, the bits of `know_suits`, the per-suit arrays, and clue values.
+
+### 8.3 Step fields: the action
+
+| Field | Values |
+|---|---|
+| `actor` | Relative seat (relative to the viewer) |
+| `type` | 0 play · 1 discard · 2 colour clue · 3 rank clue |
+| `slot` | Play and discard: the slot 1–5 the card left, in the actor's hand before the action. Otherwise 0 |
+| `target`, `value` | Clues: the recipient's relative seat, and the suit index or rank. Otherwise 255 |
+| `touched` | Clues: a 5-bit mask of the touched slots in the recipient's hand, before the action. Missed slots are the zeros |
+| `card_suit`, `card_rank` | Play and discard: the card's identity, which the action reveals to everyone. This is where the viewer's own cards become known |
+| `ok` | Play: 1 success, 0 misplay |
+| `drew` | 1 if a card was drawn after the action (0 once the deck is empty) |
+
+**Actions are stored factored, and no action class numbering is stored** (decided 2026-09-26). The same
+fields describe every move in every configuration. How a model outputs a move is part of the model, and
+each option below is built from these fields and the legal masks (§8.4):
+
+| Output | How it works | Handles variable players and hand sizes |
+|---|---|---|
+| Flat classes | One softmax over a fixed index, e.g. 5 plays + 5 discards + 4 targets × 11 clue values = 54, relative to the actor | Only through masking. Unused classes (teal in 5-suit games, slot 5 in 4-card hands, seats 3–4 in small games) are harmless once masked, but related classes share nothing: "clue 3 to the 4th next player" learns only from 5-player games |
+| Factored | Choose the type, then the slot, or the target and then the clue value; the probability is the product | Sharing within each part: "rank 3" is the same output for every target |
+| Scoring each candidate | Score each legal move from what it refers to: a play or discard from that slot's card (age, clues, knowledge), a clue from the target's hand and the cards it would touch | No padding; one scorer for every seat and hand size |
+| Tokens | The move is written with the same tokens that describe actions in the input, and the policy is next-token prediction with masked decoding | The factored option applied to text, at no extra cost |
+
+One thing to know about slot numbers: slots count from the newest card, so the oldest card is slot 5 in a
+5-card hand but slot 4 in a 4-card hand, and hands shrink at the end of All or Nothing games. A model that
+needs a card's position relative to the oldest end gets it from `age` and the number of cards in the hand.
+Scoring each candidate avoids the question.
+
+### 8.4 Step fields: labels and targets
+
+These are **never** model input.
+
+| Field | Shape | Contents |
+|---|---|---|
+| `is_label` | — | 1 where `actor` = 0, the viewer's own decision. The step's action fields (§8.3) are then the label |
+| `legal_play`, `legal_discard` | [5] | Slots the viewer may play or discard |
+| `legal_clue` | [4, 11] | Clues the viewer may give: the target's relative seat 1–4 × value (0–5 a colour, 6–10 rank 1–5) |
+| `effect` | — | Bits from `meta.label_effect` (misplay, lost_critical, ended_game) and `misplay_run_to_end` |
+| `filters` | — | Bitmask of the agreed filters that catch the move (`label-filtering.md` §3) |
+| `own_suit`, `own_rank` | [5] per frame | The viewer's true hand (`private`, §7.2). Only in full-information records (`has_private`). Used as an auxiliary belief target: predicting your own cards |
+
+The legal masks are filled on the viewer's steps only, and are zeros elsewhere. The viewer can't know which
+clues a teammate could legally give them, because that depends on the viewer's hidden cards. They're stored
+in this structured shape so that storage fixes no action numbering. Flat, factored and token masks are all
+simple reshapes of them.
+
+Steps where a teammate acts have no label for the viewer, but their action fields can still be used as an
+auxiliary target (predicting teammates' moves). Game-level results (`end_condition`, `final_score`, `won`,
+`total_turns`) are stored per trajectory, as value targets and for filtering.
+
+### 8.5 Storage
+
+```text
+data/trajectories/hanabi-trajectory-v0/          (derived, not committed; regenerate from GameRecords)
+  shard-00000.npz      np.savez_compressed, loaded with allow_pickle=False
+    traj_*   [N]        n_players, n_suits, hand_size, all_or_nothing, viewer (absolute seat), end_condition,
+                        final_score, won, has_private, game_id; frame_start, step_start, n_steps
+    frame_*  [ΣT+N, …]  every frame field of §8.2, the shard's trajectories concatenated
+    step_*   [ΣT, …]    every step field of §8.3–8.4, concatenated
+  index.jsonl          one line per trajectory: shard, row, game_id, viewer, seed, players, datetime
+```
+
+- **Ragged data is flattened with offsets.** Trajectory *i*'s frames are
+  `frame_*[frame_start[i] : frame_start[i] + n_steps[i] + 1]`. That's one array per field, not one file per
+  game, so loading is a slice.
+- **Text metadata stays out of the arrays.** The seed, names and date go in `index.jsonl`, where filters
+  and the train/test split by seed (§3.5) read them.
+- **Versioned** as `hanabi-trajectory/v0` (the directory name and a `schema` entry in each shard), like the
+  other layers. The vocabulary (§8.6) is versioned with it.
+- **Size.** A frame is about 300 bytes (25 slots × 9 fields, plus the board, `discards` and `unseen`).
+  pour1out4bga's 6-suit games alone make about 28k trajectories (games × seats) with roughly 60 steps each,
+  so about 1.7 M frames: roughly 0.5 GB before compression, and much less after. So it fits in memory.
+- **numpy is a dependency** of the package (`pyproject.toml`), and tests use it freely.
+
+### 8.6 Serializations (derived in the training code, not stored)
+
+- **Tokens (from scratch).** A reference vocabulary lives with the schema in `trajectory.py`, so training
+  and the live client produce identical tokens. Each (field, value) pair is a token, plus a few structural
+  tokens (frame start, action start, seat marker, `PAD`). A frame is written in a fixed field order with
+  absent seats dropped, followed by its step's action tokens. A card can be a single fused token (30
+  identities + `UNKNOWN` + `EMPTY`) followed by its knowledge tokens. For illustration only (the details are
+  Q14), seat 1's hand in the §9 example might start
+  `<S1> <R3> <k:RYGBPT> <k:12345> <P2> <k:RYGBPT> <k:2345> <T1> <k:RYGBPT> <k:1> <c1> …`.
+  Estimate: about 70 tokens per frame with 2 players and 130 with 5, so a whole game is roughly 5k–10k
+  tokens.
+- **Tensors.** Each field goes through `one_hot` or an embedding, and the results are concatenated into
+  one vector per frame, `[T+1, F]`, plus one per step. `torch.from_numpy` works on the arrays without
+  copying.
+- **Text.** A readable rendering of the same tokens, for debugging, and for trying off-the-shelf LLMs.
+
+### 8.7 No hindsight: rules and tests
+
+- **Frame *t* holds only what the viewer knew at *t*.** The viewer's own slots are always `UNKNOWN`. An own
+  card's identity first appears in the step that plays or discards it. (A DecisionRecord's `obs.cards` is
+  different: it shows what the actor knows *now*, including cards revealed since, which is right for one
+  decision but would leak between frames.)
+- **Never model input:** anything in §8.4, the seed, `game_id`, player names, the date (Q2) and deck
+  indices (`card`).
+- **Tests to build with it:**
+  - *Prefix:* the trajectory of a record cut off after *k* actions equals the first *k* + 1 frames and *k*
+    steps of the full trajectory (the game-level results aside). This shows no frame depends on the future.
+  - *View:* seat *s*'s trajectory from a full-information record equals the one from
+    `player_view(record, s)`, apart from the private targets. This is the §10 test of the live path, applied
+    to trajectories.
+  - *Round trip:* decoding a frame and its step (§8.8) gives back the DecisionRecord it was encoded from, as
+    far as the frame holds it: hands, `know`, board, `unseen`, legal moves, the label. `status` agrees too,
+    except that trajectory `trash` also covers dead cards.
+
+### 8.8 Adapter: structured records → arrays
+
+*Decided 2026-09-26.* The pipeline keeps two kinds of data. JSON-like records are for storage, inspection
+and the review tool (§6, §7, and the labeling tool's events). Dense arrays are for models (§8.2–8.5).
+`trajectory.py` is the **adapter** between them. It holds no game rules of its own, beyond the few derived
+fields.
+
+**The frame's JSON form is a DecisionRecord from the viewer's seat.** `decision_record(record, t, viewer=s)`
+already holds everything frame *t* needs, for any seat and any turn: hands, `know`, `drawn_t`, `touched_t`,
+board, `unseen`, `status`, legal moves, label, `private` and `meta`. So the adapter reads the sequence of
+viewer views and never replays games itself:
+
+```text
+GameRecord ──► views(record, viewer)                ──► encode ──► Trajectory (numpy arrays) ──► shards
+               one replay, a DecisionRecord per
+               position (T + 1) from one seat's view
+labeling tool events ──► encode_move ──► step-shaped fields and masks (the human-label file, later)
+model output ──► decode_move ──► a move in `legal` format (for the live client)
+```
+
+| Piece | What it does |
+|---|---|
+| `views(record, viewer)` (in `decision.py`) | New. Every position from one seat's view in a single replay, as `decisions()` does for actors. With `private` for full-information records |
+| `encode_frame(view)` | One DecisionRecord → the frame fields (§8.2). `age`, `touches` and `touch_age` come from `drawn_t` and `touched_t`, and dead cards (for `trash`) from the stacks and discards |
+| `encode_step(event, view)` | One history event → the step fields (§8.3), with the card IDs it names turned into slots using the hands of the frame before it |
+| `encode_move(move, view)` | Any move, in any of the three forms the repo uses, → factored fields and a position in the legal-mask shape (§8.4). The forms are: a GameRecord event (absolute seats, card IDs), a DecisionRecord `label`/`legal[]` entry (relative seats, slots), and a labeling-tool `choice` or `also_ok` entry (absolute `to_seat`, card IDs). Used for labels, legal masks and human labels alike |
+| `decode_move(fields, view)` | The inverse: factored fields → a move in `legal` format. The live client uses it to turn model output into a move to send |
+| `trajectory(record, viewer)` | `views` → `encode_*` → a `Trajectory` (named numpy arrays, §8.1–8.4) |
+| `write_shards` / `read_shards` | §8.5 |
+| `render(traj, t)` | A readable printout of frame *t* and step *t*, for checking by eye and in tests |
+
+**First implementation:** the pieces above, the §8.7 tests, and a CLI command next to `decisions`.
+**Later:** the token vocabulary (Q14), and a human-label file built with `encode_move`, keyed by
+(`game_id`, `viewer`, step) with `also_ok` stored as masks in the legal shape.
+
+Building every frame through a full DecisionRecord repeats the history list at each position, so it's
+O(T²) per trajectory. With T below about 100 that's fine: trajectories are built once and cached (§8.5).
+
+---
+
+## 9. Worked example: game 78921, turn 4 (screenshot 1)
 
 harikari.live (seat 0) is to act. pour1out4bga (seat 1) holds R3 P2 T1 P1 T1. Both players have received a
 1s clue, and Y1 has been played. harikari.live's actual move was a **Purple clue** to pour1out4bga,
@@ -635,7 +867,7 @@ Things to note:
 
 ---
 
-## 9. Validation, size and storage
+## 10. Validation, size and storage
 
 All of these are implemented: the engine raises `InvalidGame` while replaying, and `check_record` (or
 `python3 -m hanabi_data check`) runs the rest.
@@ -684,23 +916,27 @@ split can group games by deck. Seeds stay out of `obs`.
 **Size.** The worked example is ~3.0 KB (~2.4 KB of it `obs`). A late-game 4–5 player record, with ~80 history events and 20
 slots, should come to about 10–15 KB of compact JSON. At ~9.5k games × ~60 decisions that is several GB
 uncompressed, which is why §5 stores game records (~5 KB each, ≈50 MB in total) and derives decision
-records on demand, with an optional cache.
+records on demand, with an optional cache. Trajectories are far more compact (about 300 bytes per frame,
+~0.5 GB before compression for the same games, §8.5), so they are cached.
 
 ---
 
-## 10. Label quality
+## 11. Label quality
 
 Moved to **`label-filtering.md`**: the two training phases, the filtering decisions, the filters,
 deliberate strikeouts (its §5.1), proposals, open questions and progress.
 
 ---
 
-## 11. Open questions
+## 12. Open questions
 
 1. **Label filtering policy.** Tracked in `label-filtering.md` (decisions §2, open questions §7).
 2. **Convention drift.** Filter by date, weight toward recent games, or add a date/era marker to `obs`?
 3. **Model format and token budget.** Which model reads this, and at what context length? That decides
    the compact format's size. JSON field names are a large share of the ~2.4 KB of `obs`.
+   *Answered 2026-09-26:* models are trained from scratch: sequence models with their own vocabulary, and
+   tensor models. Both read integer-coded numpy trajectories, one per (game, viewer seat), with a frame for
+   every turn (§8). A whole game is roughly 5k–10k tokens (§8.6). What's left is in Q14.
 4. **Pace under All or Nothing.** There is no final round, so the displayed pace (`score + deck + players
    − max`) doesn't measure a real limit. Keep it because players see it and may react to it, drop it, or
    replace it with a measure suited to All or Nothing?
@@ -714,8 +950,16 @@ deliberate strikeouts (its §5.1), proposals, open questions and progress.
    belong to a game that is already lost (`label_effect.lost_critical` marks the move that lost it).
 6. **Deeper knowledge features.** Should `know` also account for what the holder can see in other hands
    (per-holder card counting), or leave that to the model?
+   *Candidate, 2026-09-30:* status bits computed from the holder's knowledge instead of the true identity
+   (§8.2), so they also apply to the viewer's own cards. Take the identities `know` allows, minus those
+   whose copies are all played or discarded. Then *certainly playable* = every remaining identity is
+   playable, *possibly critical* = at least one is critical, and *certainly trash* = all are trash. These
+   follow from the rules only. "Probably" (weighted by unseen copies or by conventions) is left to the
+   model.
 7. **Augmentation.** Suits play identical roles in these variants. Should training shuffle suit letters
    consistently across a record? Shuffling seats is not valid, because seat order matters.
+   *Note 2026-09-26:* trajectories keep suit and rank as separate fields, so a permutation is a single
+   lookup table (§8.2). Whether the group's conventions treat every suit alike is still to check.
 8. **Player identity in `obs`.** Leave players anonymous (current plan), or add per-player tokens so the
    model can learn individual styles?
 9. **Where the shared schema lives.** The live client repo (formerly the screenshot parser) and this repo
@@ -730,7 +974,7 @@ deliberate strikeouts (its §5.1), proposals, open questions and progress.
     Game state matched the `c1d970b` reducer at every position of games 78921 and 78822.
     The live stream of game 78922 matched `c1d970b`'s message formats and its hiding rules (§3.4).
     The engine now implements §4 and agrees with the `c1d970b` reducer on every position of the three
-    examples and five longer synthetic games (§9). What's still missing is a sample of real games,
+    examples and five longer synthetic games (§10). What's still missing is a sample of real games,
     especially ones that run past the end of the deck.
 11. **The live client.** Would the bot play from its own account or a player's? It needs a logged-in
     websocket connection either way. Are the server admins and the group OK with a bot connecting? Should
@@ -743,3 +987,18 @@ deliberate strikeouts (its §5.1), proposals, open questions and progress.
     `tests/data/golden_decisions.jsonl` freezes. Should `trash` also cover these cards? That would be
     `hanabi-decision/v1`. Under All or Nothing such a game ends at once, so it matters mainly for 5-suit
     games without All or Nothing.
+    *Trajectories, 2026-09-26:* their `status.trash` means "can never be played" and covers dead cards
+    (§8.2). A separate `dead` bit was considered and dropped: for a move, trash and dead cards are the same
+    (never play them; discarding them is safe), and the difference, that a suit's max is capped, is
+    already in `stacks` and `discards`. DecisionRecords are unchanged for now.
+14. **Vocabulary details** (§8.6). These can wait until the first model trains, since none of them change
+    what is stored:
+    - One fused token per card (`<G3>`), or separate suit and rank tokens?
+    - Drop absent seats and empty slots, or pad every frame to a fixed length (the position then
+      identifies the field, with no marker tokens)?
+    - Buckets for `age` and `touch_age`.
+    - Which derived fields (`status`, `unseen`, `pace`) go into the tokens.
+    - The output: flat classes, factored, scoring each candidate, or tokens (§8.3). This is a model choice,
+      and different models can make different ones.
+    - Every step has a frame (decided). If 5-player games turn out too long as tokens, a frame could be
+      written as its changes from the previous frame.

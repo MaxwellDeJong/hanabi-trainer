@@ -37,6 +37,61 @@ both): 443 moves. `check` passes on all 12, and all 12 bundles match hanab.live'
 - Decide whether to agree the two candidate filters, and the next widening (`label-filtering.md` §7).
 - Share the review tool with a few labelers through a tunnel; decide on sign-in before hosting.
 - Capture another live game (All or Nothing, 3+ players, with an `init` message).
+- Build the trajectory adapter (`representation.md` §8.8): `views()`, `hanabi_data/trajectory.py`, sharded
+  `.npz`, `render`, and the prefix, view and round-trip tests of §8.7. Install numpy on `compute`.
+
+---
+
+## 2026-09-26 · Model input format decided: trajectories (design only)
+
+Discussed how to represent the data so that many kinds of learning algorithms can be tried: token
+sequences with a custom vocabulary (NLP-style, autoregressive) as well as frame tensors for LSTMs and
+similar models. Written up as `representation.md` §8, which answers Q3. No code yet.
+
+| Decision (user) | Now |
+|---|---|
+| Models | Trained **from scratch**: sequence models with their own vocabulary, and tensor models. Trying an off-the-shelf LLM on a text rendering is a side experiment |
+| Frames | A frame for **every turn**, whoever acts, not just the viewer's turns |
+| Storage | **numpy** for the numerical data. The training code converts to torch |
+
+What §8 proposes on top of that:
+- **One trajectory per (game, viewer seat).** It has T + 1 frames and T steps, with seats relative to the
+  viewer. A decision's input is a prefix of it, so a causal model gets every one of the seat's decisions in
+  one pass.
+- **Frames plus actions.** Each step stores the action explicitly (actor, type, slot, target, value,
+  touched-slot mask, revealed card, `ok`), because frame differences don't always show it.
+- **Integer codes, not tokens or one-hot.** Small categorical fields, mostly `uint8`: board, discard
+  counts, and per slot the identity (with separate `EMPTY` and `UNKNOWN` codes), clue knowledge for every
+  seat, touches, ages and deck index, plus derived rules-only fields. Tokens and tensors are both derived
+  in the training code. The reference vocabulary lives here, so the live client produces identical input.
+- **Labels and targets, never input:** `is_label`, legal masks (the viewer's steps only), effect and filter
+  bits, own hand (an auxiliary belief target), teammates' actions, game results.
+- **Action classes (decided later that day).** A first draft had a fixed 54-class `action_id`. Discussion:
+  unused classes are harmless once masked, but slot numbers mean different things for different hand sizes,
+  and flat classes share nothing between seats (5-player-only classes train on 199 games). So actions are
+  stored factored, the legal masks are stored structured (`legal_play[5]`, `legal_discard[5]`,
+  `legal_clue[4, 11]`), and the output (flat, factored, scoring each candidate, tokens) is left to each model.
+- **Storage:** compressed `.npz` shards, with ragged data flattened using offsets; text metadata (seed,
+  names, date) goes in `index.jsonl`. Roughly 300 B per frame, so about 0.5 GB before compression for
+  pour1out4bga's 6-suit games.
+- **No hindsight:** frame *t* holds only what the viewer knew at *t*. Three tests are planned: prefix,
+  view, and agreement with DecisionRecords.
+- Open details, which don't affect what's stored: Q14 (fused or separate card tokens, padding, age
+  buckets, which derived fields become tokens, delta frames if 5-player games get too long).
+
+Later the same day:
+- **`status` for trajectories:** `trash` means "can never be played" and covers dead cards. A separate
+  `dead` bit adds nothing for a move, because the capped suit already shows in `stacks` and `discards`
+  (Q13 note).
+- **Adapter (§8.8):** `trajectory.py` translates the JSON records into arrays. Its frame input is a
+  DecisionRecord from the viewer's seat (a new `views(record, viewer)`, one replay per trajectory). One
+  `encode_move` handles moves from GameRecords, DecisionRecords and the labeling tool, and `decode_move`
+  turns model output back into a move. The first implementation also includes shards, `render` and the
+  §8.7 tests (prefix, view, round trip). The vocabulary and the human-label file come later.
+- **numpy** is now a dependency in `pyproject.toml`, used freely in tests too.
+
+`representation.md` §8–11 became §9–12 to make room. References in code docstrings, tests,
+`examples/README.md` and `review-tool.md` were updated; older log entries keep their old numbers.
 
 ---
 

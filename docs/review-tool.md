@@ -197,7 +197,7 @@ know about their own cards; needs a key other than Tab, which is the hint).
 
 - All hands face-up, free navigation, and a switch to any seat's view: that seat's view is exactly
   `obs`, so it tests that the actor's cards are hidden correctly.
-- **Checks panel:** the `representation.md` §9 checks, invariants (total card count preserved; each turn's history
+- **Checks panel:** the `representation.md` §10 checks, invariants (total card count preserved; each turn's history
   extends the previous one; label ∈ `legal`; `unseen` agrees with the visible cards), and differences
   from the official engine (§6.2). Each failure links to its turn. *Not built:* marking failures on the
   timeline.
@@ -256,7 +256,7 @@ on every game, not just the ones we look at.
 
 Limits: the reducer doesn't decide when a game ends (hanab.live's server does), and new.playhanabi.com runs
 an older version than `c1d970b` (its log wording differs, `docs/progress.md`). End conditions and the
-server's version are covered by the `listing.score` check (`representation.md` §9). That check is
+server's version are covered by the `listing.score` check (`representation.md` §10). That check is
 skipped for now: `listing` is always `null` until the `/history` page is parsed.
 
 ---

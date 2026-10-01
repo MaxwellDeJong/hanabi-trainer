@@ -1,4 +1,4 @@
-"""Export -> GameRecord: endings, metadata, rejected games, the checks of docs/representation.md §9."""
+"""Export -> GameRecord: endings, metadata, rejected games, the checks of docs/representation.md §10."""
 import copy
 
 import pytest
