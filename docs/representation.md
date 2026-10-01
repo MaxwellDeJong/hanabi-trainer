@@ -67,7 +67,7 @@ All five are implemented in the `hanabi_data/` package (§5.1). Trajectories sin
 | Endpoint on `new.playhanabi.com` | Status | Returns |
 |---|---|---|
 | `/export/<gameID>` | ✅ works, **finished games only** | `id`, `players`, `deck`, `actions`, `options`, `seed` |
-| `/history/<player>` | ✅ works | One HTML page listing **every** game (ID, player count, score, variant, date/time, players, "Other Scores" = the number of other games played on the same seed). 11.6 MB / 16,731 rows for pour1out4bga |
+| `/history/<player>` | ✅ works | One HTML page listing **every** game (ID, player count, score, variant, date/time, players (sorted by name, not seat order), "Other Scores" = the number of games played on the same seed, **this one included**: never below 1). Times are end times, in UTC. 11.6 MB / 16,731 rows for pour1out4bga |
 | `/game/<tableID>`, `/game/<tableID>/shadow/<seat>` | ✅ (logged in) | The live game client. Its game state arrives over the websocket (§3.4) |
 | `/api/v1/history*`, `/api/v1/variants/*` | ❌ 404 | These exist only on hanab.live |
 
@@ -81,7 +81,9 @@ All five are implemented in the `hanabi_data/` package (§5.1). Trajectories sin
 - **harikari.live's history (fetched once, 2026-09-30; saved in `data/history/`):** 25,412 games, IDs 2447 (2021-09-17)
   to 79136 (2026-09-28). Target set (6 Suits or No Variant, 2–5 players): **13,975** exports: 6 Suits 11,405
   (2p 3,652 · 3p 5,794 · 4p 1,760 · 5p 199), No Variant 2,570. The page's time is the end time only; the median gap
-  between consecutive games is 30 s, so most deals are abandoned quickly.
+  between consecutive games is 30 s, so most deals are abandoned quickly. Parsed by `listing.py` (§5.1) into
+  `data/history/listing.jsonl`. All 11 of the 12 games on hand that appear there pass the listing checks
+  (78663 isn't in harikari.live's history).
 - **pour1out4bga's 6-suit games:** 2p 2,432 · 3p 5,070 · 4p 1,788 · 5p 199. Of these, 9,084 score 0 and
   285 score 30.
 
@@ -184,7 +186,8 @@ before, but other players will have played it: game 78922's seed shows "Other Sc
 will contain **several games with the same deck**, played by different groups of players. Two
 consequences:
 - **Split training and test data by seed**, not by game. Otherwise the model can learn to recognise decks
-  it has already seen and infer hidden cards from them (Q12).
+  it has already seen and infer hidden cards from them (Q12). Fixed 2026-10-01: `listing.split_of(seed)`
+  (§10).
 - The seed must never be model input (§3.4).
 
 ### 3.6 The 10-game sample (2026-09-25)
@@ -272,7 +275,8 @@ variant other than "No Variant" and "6 Suits", and the options `cardCycle`, `dec
 | `decision.py` | `decisions(record)`, `decision_record(record, turn, viewer=)`, `views(record, viewer)`, `summarize(record)` |
 | `check.py` | `check_record(record)`: the §10 checks |
 | `filters.py` | Label filters for the pretraining corpus (`label-filtering.md`): `FILTERS` with their status, `fired(engine, action)`, `firings(record, summary)` |
-| `record.py` | `load_game(path)` (a GameRecord or a raw export), `player_view(record, seat)` |
+| `record.py` | `load_game(path, listing=)` (a GameRecord or a raw export; `listing` fills in its `/history` row), `player_view(record, seat)` |
+| `listing.py` | Saved `/history` pages → listing rows (§6): `parse_history`, `merge` (several players' pages, one row per game), `load_listing`/`write_listing` (`.jsonl`), `in_scope`, `attach`. The split by seed: `seed_bucket`, `split_of` (§10) |
 | `download.py` | `download(ids, out_dir)`: polite fetching of `/export/<id>` into a permanent cache (one request at a time, ≥5 s apart by default, a cap per run, stops at the first error). For small hand-picked samples until bulk collection is approved |
 | `trajectory.py` | The adapter (§8.8): `trajectory(record, viewer)`, `encode_move`/`decode_move`, `write_shards`/`read_shards`/`load_shard`, `render`. The only module that imports numpy, and `__init__.py` doesn't import it, so the rest of the package (and the review tool) runs without numpy. Later: the reference vocabulary |
 
@@ -285,6 +289,8 @@ python3 -m hanabi_data check game.json ...
 python3 -m hanabi_data filters data/exports/*.json                                # moves the filters catch
 python3 -m hanabi_data trajectory examples/export_78921.json --seat 1 --turn 4    # one seat's frames, readable
 python3 -m hanabi_data trajectories data/exports/*.json --out data/trajectories/hanabi-trajectory-v0
+python3 -m hanabi_data listing data/history/*.html --out data/history/listing.jsonl   # parse saved history pages
+python3 -m hanabi_data check --listing data/history/listing.jsonl data/exports/*.json # any game command takes --listing
 python3 -m pytest                                                                  # tests/
 ```
 
@@ -325,7 +331,9 @@ Game 78922 as a full-information record, abridged:
     ...
     {"e": "end", "condition": 2, "seat": null}      // Strikeout
   ],
-  "listing": {"datetime": "2026-09-24T00:35:32Z", "num_players": 2, "score": 0, "variant": "No Variant"},
+  "listing": {"game_id": 78922, "num_players": 2, "score": 0, "variant": "No Variant",
+              "datetime": "2026-09-24T00:35:32Z", "players": ["d3m0n", "harikari.live"],
+              "seed": "p2v0s713", "seed_games": 8},
   "raw": { /* the /export/<id> response, unchanged */ }
 }
 ```
@@ -336,7 +344,7 @@ Game 78922 as a full-information record, abridged:
 | `view` | `null` for full information, or the seat whose view this is |
 | `players`, `options` | Seat order, and the settings the engine needs: `variant`, `suits`, `hand_size`, `all_or_nothing`, `speedrun`, `starting_player`. Everything else (timer settings, …) stays only in `raw` |
 | `events[]` | `draw {seat, card, id}` · `clue {by, to, kind, value, touched}` · `play {by, card, id, ok}` · `discard {by, card, id}` · `end {condition, seat}` |
-| `listing` | The `/history` row (exports only; `null` until the history-page parser exists) |
+| `listing` | The `/history` row (exports only): `game_id`, `num_players`, `score`, `variant`, `datetime` (end time, UTC), `players` (sorted by name), `seed`, `seed_games` ("Other Scores", this game included). `null` when the game isn't in a saved history page, or when no listing was given (`--listing`) |
 | `raw` | What the converter read, unchanged: the export, or the captured stream messages. **Never the seed for a live record** (§3.4) |
 
 **Rules for `events`:**
@@ -366,7 +374,7 @@ Game 78922 as a full-information record, abridged:
 | `end` | Detected by the engine, or from type 4/5 | Copied from `gameOver` |
 | `view` | Always `null` | The one seat whose draws arrive hidden; `null` if nothing is hidden (a finished game, reloaded). Must equal `init.ourPlayerIndex` |
 | Messages | | `gameActionList` replaces everything so far (it's re-sent on every reload); `gameAction` adds one event; `init` gives the players and options, and its seed is dropped |
-| Checks | Final score = `listing.score`; the events equal a fresh conversion of `raw` | Clue count, score and `maxScore` = the `status` events; whose turn = the `turn` events; `touched` = the engine's result for every clue to a visible hand |
+| Checks | `listing` agrees (score, game ID, players, variant, seed); the events equal a fresh conversion of `raw` | Clue count, score and `maxScore` = the `status` events; whose turn = the `turn` events; `touched` = the engine's result for every clue to a visible hand |
 
 A full-information record can produce decision records for **every** seat. A player's-view record can
 produce them only for that player, and only up to the current turn. For a game with both, the decision
@@ -436,7 +444,7 @@ no label.
 |---|---|---|
 | `players` | Names in relative seat order | Filter or weight by player; no player identity in `obs` |
 | `actor` | The name of the player to act | |
-| `datetime` | From `listing` (`null` until the history-page parser exists) | Handle convention drift (weight recent games, or add an era marker) |
+| `datetime` | From `listing` (`null` without one) | Handle convention drift (weight recent games, or add an era marker) |
 | `seed` | The export's seed; `null` for live records | Split train/test by deck (§3.5) |
 | `end_condition` | §4 code, derived by the engine | Filter by game result |
 | `final_score` | As recorded: 0 unless `end_condition` is Normal | |
@@ -891,7 +899,7 @@ All of these are implemented: the engine raises `InvalidGame` while replaying, a
 - The engine's end state is consistent: it reaches a rule-based ending (win, strikeout, All or Nothing
   fail/softlock) or finishes with an explicit end action (type 4/5). Otherwise flag the game as
   truncated.
-- The engine's final score matches `listing.score`.
+- The listing agrees with the record: final score, game ID, player count, players (sorted), variant, seed.
 - Export records: the events equal a fresh conversion of `raw`.
 
 **Extra checks for live records** (§6): the engine's clue count and score match every `status` event, its
@@ -921,7 +929,11 @@ to exactly the export's events. The same test runs on every synthetic game for e
 - **Rejected input:** illegal moves, bad decks, unsupported options, tampered records, broken streams.
 
 **Train/test split by seed** (§3.5, Q12). Every record carries its seed (`raw.seed` for exports) so the
-split can group games by deck. Seeds stay out of `obs`.
+split can group games by deck. Seeds stay out of `obs`. Fixed 2026-10-01 in `listing.py`: a seed's bucket
+(0–99) is a salted SHA-256 of it, buckets 0–4 are `test`, 5–9 `valid` and the rest `train`. The split is
+computed from the seed wherever it's needed (`meta.seed`, the trajectory index) rather than stored. Tests
+freeze three seeds' buckets, so the split can't move silently. On harikari.live's 13,975 in-scope games:
+test 665 · valid 650 · train 12,660.
 
 **Size.** The worked example is ~3.0 KB (~2.4 KB of it `obs`). A late-game 4–5 player record, with ~80 history events and 20
 slots, should come to about 10–15 KB of compact JSON. At ~9.5k games × ~60 decisions that is several GB
@@ -942,6 +954,9 @@ deliberate strikeouts (its §5.1), proposals, open questions and progress.
 
 1. **Label filtering policy.** Tracked in `label-filtering.md` (decisions §2, open questions §7).
 2. **Convention drift.** Filter by date, weight toward recent games, or add a date/era marker to `obs`?
+   *Data, 2026-10-01:* every listed game now has its end time (`meta.datetime`, the trajectory index). In-scope
+   games per year: 2021 5 · 2022 4,124 · 2023 1,681 · 2024 1,887 · 2025 2,657 · 2026 3,621. Still open: when
+   the conventions changed (the group could say), and what to do about it.
 3. **Model format and token budget.** Which model reads this, and at what context length? That decides
    the compact format's size. JSON field names are a large share of the ~2.4 KB of `obs`.
    *Answered 2026-09-26:* models are trained from scratch: sequence models with their own vocabulary, and
@@ -991,6 +1006,10 @@ deliberate strikeouts (its §5.1), proposals, open questions and progress.
     it send moves over the websocket, or click in the browser?
 12. **Train/test split by seed.** Same-seed games share a deck (§3.5). Split by seed (recommended), and
     check how often seeds repeat within our data once the listing is parsed. `meta.seed` carries it.
+    *Answered 2026-10-01:* split by seed, fixed in `listing.split_of` (§10). Within harikari.live's 13,975
+    in-scope games **no seed repeats**: the server picks a seed new to the table. 6,105 of them (44%) are on
+    a seed that other tables also played, so repeats appear only if other players' games are added. The
+    split covers that case already.
 13. **`status` misses dead cards.** `trash` means "already played". A card above a rank whose copies are
     all discarded (e.g. B3 after both B2s are gone) can never be played either, but gets no flag, and
     `critical` can still be set on it. The engine keeps the original prototype's behaviour here, which
