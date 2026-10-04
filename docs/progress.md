@@ -8,19 +8,19 @@ Older entries are kept as written. Where the code has since changed, the entry h
 
 ---
 
-## Current state (checked against the code 2026-10-01)
+## Current state (checked against the code 2026-10-02)
 
-`python3 -m pytest`: **197 passed**. 12 games on hand (3 in `examples/`, 10 in `data/exports/`, 78921 in
+`python3 -m pytest`: **204 passed**. 12 games on hand (3 in `examples/`, 10 in `data/exports/`, 78921 in
 both): 443 moves. `check` passes on all 12, and all 12 bundles match hanab.live's reducer with 0 errors.
 
 | Area | Where | State |
 |---|---|---|
-| **Data model** | `hanabi_data/` (`record.py`, `convert_export.py`, `convert_live.py`, `decision.py`) | GameRecord (event log) from an export or a live websocket capture; DecisionRecord `hanabi-decision/v0` per turn from any seat's view, with `meta` (result, `label_effect`, misplay run fields, `seed`, `filters`). CLI: `convert-export`, `convert-live`, `decision`, `decisions`, `check`, `filters`, each with `--listing FILE` to fill in the game's `/history` row (and so `meta.datetime`) |
+| **Data model** | `hanabi_data/` (`record.py`, `convert_export.py`, `convert_live.py`, `decision.py`) | GameRecord (event log) from an export or a live websocket capture; DecisionRecord `hanabi-decision/v0` per turn from any seat's view, with `meta` (result, `label_effect`, misplay run fields, `seed`, `filters`). CLI: `convert-export`, `convert-live`, `decision`, `decisions`, `check` (`--summary`: the pilot report), `filters`, each with `--listing FILE` to fill in the game's `/history` row (and so `meta.datetime`) |
 | **Listing and split** | `hanabi_data/listing.py`, `data/history/` | harikari.live's saved history page → `data/history/listing.jsonl` (25,412 rows; 13,975 in scope). `check` compares a game with its row. Train/valid/test split fixed by seed hash (`split_of`): 12,660 / 650 / 665 of the in-scope games. CLI: `listing` |
 | **Game engine** | `hanabi_data/engine.py`, `rules.py` | Replays and validates GameRecords, full information or one player's view; every rule-based ending incl. All or Nothing, strikeout, surrender. Frozen against the retired prototype's output by `tests/data/golden_decisions.jsonl` (`meta` not compared); checked against hanab.live's reducer by `review/oracle/` |
 | **Trajectories** | `hanabi_data/trajectory.py`, `decision.views()` | `hanabi-trajectory/v0` (`representation.md` §8): one per (game, viewer seat), integer-coded numpy frames and steps, `.npz` shards + `index.jsonl`, `encode_move`/`decode_move` for every move format, `render`. CLI: `trajectory`, `trajectories`. Prefix, view and round-trip tests pass on all 12 games and the live captures. No vocabulary yet (Q14). numpy needed only for this module |
 | **Corpus build** | `hanabi_data/corpus.py` | `corpus GAMES… --out DIR [--listing] [--jobs]`: every game checked, searched by the filters and split by seed; good games → shards in `train/`, `valid/`, `test/`; `games.jsonl` says why any file was left out; `report.txt`. Parallel and deterministic, no resume (rebuild instead). On the 12 games: 10 train, 2 valid, 0 test |
-| **Downloader** | `hanabi_data/download.py` | Polite: one request at a time, oldest first, ≤0.5 request/s, cached and resumable, stops at the first problem, logs to `download_log.jsonl`. Bulk mode built: `--listing` targets (13,966 missing, ~8 h), a terms file required past 20 missing exports, UTC window, pilot runs (`--max-requests`). Used once, for the 10 games in `target_games.txt`. **Bulk download waits for the server owner's permission**: no terms file exists |
+| **Downloader** | `hanabi_data/download.py` | Polite: one request at a time, oldest first, ≤0.5 request/s, cached and resumable, stops at the first problem, logs to `download_log.jsonl`. One fixed User-Agent, as promised to the owner. Bulk mode: `--listing` targets (13,966 missing, ~8 h), a terms file required past 20 missing exports, UTC window, pilot runs (`--max-requests`, `--sample`). Used once, for the 10 games in `target_games.txt`. **The owner agreed 2026-10-02** (`data/download_terms.json`, tracked); the pilot hasn't run yet |
 | **Move filtering** | `hanabi_data/filters.py`, `docs/label-filtering.md` | Two `candidate` filters (`play_clued_5_no_4`, `discard_clued_5_live`) and the `filters` report. None `agreed` yet, so `meta.filters` is always `[]`. On the 12 games: one catch (78922 turn 10, looks deliberate) |
 | **Review tool** | `review/` | **Inspect** (full bundle, any seat's view, checks, JSON; reached from the admin view) and **Label** (one seat per session, anonymised players, speedrun controls, moves apply at once, Tab hint, Backspace undo with replay, manual or auto-advance, the site's sounds, mismatch cue, Submit with fireworks). Several labelers: claims, board by game ID, 24-hour expiry, admin view. gzip for sharing through a tunnel. Label data in `review/labels/`: 5 submitted and 2 active sessions (test labelers), 76 labels |
 
@@ -36,15 +36,54 @@ both): 443 moves. `check` passes on all 12, and all 12 bundles match hanab.live'
 - `review-tool.md` phase 5: card notes, empathy, prioritised sampling, hosting.
 
 **Next**
-- While waiting for permission: work through **`while-waiting.md`** (open questions and code changes that
-  need no more data).
-- Once permitted: write `data/download_terms.json` (date, agreed rate and window), do a pilot run
-  (`--max-requests 100`) and `corpus --listing` it, then the full run and a fresh `corpus` build.
+- **Pilot on `compute`** (steps in the 2026-10-02 entry): 100 random games, `check --summary`, then the
+  full run and a fresh `corpus` build.
+- The rest of **`while-waiting.md`** (open questions and code changes that need no more data).
 - Decide whether to agree the two candidate filters, and the next widening (`label-filtering.md` §7).
 - Share the review tool with a few labelers through a tunnel; decide on sign-in before hosting.
 - Capture another live game (All or Nothing, 3+ players, with an `init` message).
 - Install numpy on `compute` (only `trajectory.py` needs it; the review tool doesn't).
 - Later for trajectories: the token vocabulary (Q14) and the human-label file (`representation.md` §8.8).
+
+---
+
+## 2026-10-02 · Permission granted; terms file, random pilot, pilot report ✅
+
+The server owner agreed to option 1 of `message_to_server_owner.md` (scripted download) at **0.5
+request/s**. His only wish: don't crash the server. No fixed window: a run starts only after checking by
+hand that nobody else is on new.playhanabi.com. **No request has been sent yet.**
+
+| Piece | Now |
+|---|---|
+| Terms | `data/download_terms.json`: `approved` 2026-10-02, `rate` 0.5, a `note` with the condition above, no `window`. Tracked in git (`.gitignore` now ignores `/data/*` except this file), so `compute` gets it with a pull |
+| User-Agent | Every request sends `hanabi_data/0.1.0 (bulk export download, one request at a time; contact: harikari.live)`, word for word as in the message: the literal `USER_AGENT`, no longer built from `ENGINE_VERSION`, and no `--contact`. Before, it was sent only with a terms file; runs without one said "small hand-picked sample" |
+| Random pilot | `--sample N` (needs `--listing`): N in-scope games at random (fixed seed), the same N every run, so a stopped pilot resumes and the full run skips them. 100 → 27/14/13/17/29 games in 2022–2026, 83 6 Suits, 17 No Variant; 39/39/21/1 games with 2/3/4/5 players; about 4 minutes |
+| Pilot report | `check --summary` (`while-waiting.md` B2; `check.py` `game_facts`, `summary`): games that failed listed first, then variants, players, endings, how many games ran out of deck and played on past a round (All or Nothing only), every option seen, options the engine doesn't read, games without a history-page row, problems by kind with example IDs, and the same per year. Takes directories; duplicate game IDs are skipped. No numpy needed |
+| Tests | `tests/test_pilot_report.py` (5), `test_download.py` +2 (sample; the User-Agent on every run). 204 pass |
+
+On the 12 games on hand: all pass; the deck ran out in 5, and in 78742 (All or Nothing, 2 players) play
+went on 3 turns after it.
+
+**Steps on `compute`** (after committing and pushing here):
+
+```bash
+git pull
+# from this laptop: the listing is untracked (other players' names; the repo is on GitHub)
+ssh compute mkdir -p Documents/hanabi-trainer/data/history
+scp data/history/listing.jsonl compute:Documents/hanabi-trainer/data/history/
+# on compute:
+# check nobody else is on new.playhanabi.com, then (in tmux):
+python3 -m hanabi_data.download --listing data/history/listing.jsonl --terms data/download_terms.json --sample 100 --dry-run
+python3 -m hanabi_data.download --listing data/history/listing.jsonl --terms data/download_terms.json --sample 100
+python3 -m hanabi_data check data/exports --listing data/history/listing.jsonl --summary
+# if it looks good (and numpy is installed): the full run, then the corpus
+python3 -m hanabi_data.download --listing data/history/listing.jsonl --terms data/download_terms.json
+python3 -m hanabi_data corpus data/exports --listing data/history/listing.jsonl --out data/corpus
+```
+
+What to look for in the report: problems of any kind (each one is either an engine gap or a game to
+leave out), options the engine doesn't read, a year whose option sets or failures differ from the rest,
+and whether games that played past the deck pass (RQ10).
 
 ---
 
@@ -350,6 +389,7 @@ python3 -m hanabi_data.download $(awk -F', ' 'NR>1{print $2}' target_games.txt)
   *Since changed (2026-10-01):* `--rate` (default 0.5 request/s) replaced `--delay`, the order is oldest first,
   and a bulk mode was added (entry of that date).
   The User-Agent names the tool and a contact (`--contact`, default `harikari.live`).
+  *Since changed (2026-10-02):* one fixed User-Agent for every request; `--contact` is gone.
 - Exports go to `data/exports/export_<id>.json` unchanged, and a cached ID is never fetched again.
 - Refuses to start if more than 20 exports are missing (`--max-requests`).
 - Stops at the first problem, with no retries: HTTP error (e.g. 429), timeout, or a reply that isn't the

@@ -20,18 +20,17 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Dict, Iterable, Iterator, List, Optional, Tuple, Union
 
-from .check import check_record
+from .check import END_NAMES, check_record
 from .decision import summarize
 from .filters import FILTERS, firings
 from .listing import SPLITS, split_of
-from .record import load_game
-from .rules import End, Unsupported
+from .record import game_files, load_game
+from .rules import Unsupported
 from .trajectory import SCHEMA, ShardWriter, Trajectory, trajectory
 
 OK = "ok"
@@ -42,26 +41,6 @@ INVALID = "invalid"          # doesn't convert or replay
 FAILED_CHECK = "failed check"
 ERROR = "error"              # an unexpected exception: a bug to fix, not a bad game
 REASONS = (DUPLICATE, UNSUPPORTED, INVALID, FAILED_CHECK, ERROR)
-
-END_NAMES = {v: k.lower() for k, v in vars(End).items() if k.isupper() and isinstance(v, int)}
-
-
-def game_files(paths: Iterable[Union[str, Path]]) -> List[Path]:
-    """The game files to build from: files as given, directories as their `*.json`. Sorted by the game ID
-    in the file name (`export_78921.json`), so the corpus goes oldest first; ties by path."""
-    files = []
-    for p in map(Path, paths):
-        if p.is_dir():
-            files += p.glob("*.json")
-        elif p.exists():
-            files.append(p)
-        else:
-            raise ValueError(f"{p}: no such file or directory")
-
-    def key(f: Path):
-        m = re.search(r"\d+", f.stem)
-        return (int(m.group()) if m else -1, str(f))
-    return sorted(set(files), key=key)
 
 
 def build_game(path: Path, rows: Optional[Dict[int, dict]] = None) -> Tuple[dict, List[Trajectory]]:

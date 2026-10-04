@@ -31,8 +31,9 @@ All five are implemented in the `hanabi_data/` package (§5.1). Trajectories sin
 - Label filtering policy (see Q1).
 - The live client: connecting to the websocket, and sending moves (a separate repo, later; see Q11).
 - Screenshot parsing: now only a fallback, since the websocket stream gives the game state as JSON.
-- Bulk downloading: waits for the server owner's permission. Until then, a hand-picked sample of 10 games
-  (`target_games.txt`) was fetched with `hanabi_data/download.py` into `data/exports/` (§3.6).
+- Bulk downloading: the server owner agreed on 2026-10-02 (`data/download_terms.json`). Before that, a
+  hand-picked sample of 10 games (`target_games.txt`) was fetched with `hanabi_data/download.py` into
+  `data/exports/` (§3.6). Next: a random 100-game pilot, then the full download (`progress.md`).
 
 ---
 
@@ -277,7 +278,7 @@ variant other than "No Variant" and "6 Suits", and the options `cardCycle`, `dec
 | `filters.py` | Label filters for the pretraining corpus (`label-filtering.md`): `FILTERS` with their status, `fired(engine, action)`, `firings(record, summary)` |
 | `record.py` | `load_game(path, listing=)` (a GameRecord or a raw export; `listing` fills in its `/history` row), `player_view(record, seat)` |
 | `listing.py` | Saved `/history` pages → listing rows (§6): `parse_history`, `merge` (several players' pages, one row per game), `load_listing`/`write_listing` (`.jsonl`), `in_scope`, `attach`. The split by seed: `seed_bucket`, `split_of` (§10) |
-| `download.py` | `download(ids, out_dir)`: polite fetching of `/export/<id>` into a permanent cache. One request at a time, oldest first, at most 0.5 request/s by default (start to start, 1.0 hard ceiling), stops at the first error with no retries, resumes from the cache. More than 20 missing exports (a bulk run) need a **terms file** recording the owner's approval, which can also cap the rate and set a UTC window. `--listing` takes the targets from the listing (`in_scope`) and checks each export's players and seed against its row. `--max-requests` for a pilot run. Every request goes to `download_log.jsonl` |
+| `download.py` | `download(ids, out_dir)`: polite fetching of `/export/<id>` into a permanent cache. One request at a time, oldest first, at most 0.5 request/s by default (start to start, 1.0 hard ceiling), stops at the first error with no retries, resumes from the cache. More than 20 missing exports (a bulk run) need a **terms file** recording the owner's approval, which can also cap the rate and set a UTC window. `--listing` takes the targets from the listing (`in_scope`) and checks each export's players and seed against its row. `--max-requests` or `--sample N` (N random in-scope games, the same every time) for a pilot run. Every request sends the same User-Agent, word for word as promised to the owner (`USER_AGENT`), and goes to `download_log.jsonl` |
 | `trajectory.py` | The adapter (§8.8): `trajectory(record, viewer)`, `encode_move`/`decode_move`, `write_shards`/`read_shards`/`load_shard`, `render`. The only module that imports numpy, and `__init__.py` doesn't import it, so the rest of the package (and the review tool) runs without numpy. Later: the reference vocabulary |
 
 ```bash

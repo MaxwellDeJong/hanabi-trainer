@@ -14,6 +14,7 @@
     python3 -m hanabi_data.download 78738 78742 --dry-run
     python3 -m hanabi_data.download 78738 78742
     python3 -m hanabi_data.download --listing data/history/listing.jsonl --dry-run
+    python3 -m hanabi_data.download --listing data/history/listing.jsonl --terms data/download_terms.json --sample 100
     python3 -m hanabi_data.download --listing data/history/listing.jsonl --terms data/download_terms.json
 
 A terms file (JSON; only `approved` is required):
@@ -41,11 +42,14 @@ from typing import Callable, Dict, Iterable, List, Optional, Tuple
 from .record import SERVER
 
 BASE_URL = f"https://{SERVER}/export/"
-CONTACT = "harikari.live"  # player name on the server
+# Sent with every request, word for word as promised to the server owner (message of 2026-09-30). A literal,
+# so it doesn't follow ENGINE_VERSION; change it only after telling the owner.
+USER_AGENT = "hanabi_data/0.1.0 (bulk export download, one request at a time; contact: harikari.live)"
 DEFAULT_RATE = 0.5  # requests per second
 MAX_RATE = 1.0  # never faster, whatever the terms say
 JITTER = 0.1  # each gap is 1/rate times 1 to 1 + JITTER
 SMALL_RUN = 20  # more missing exports than this need a terms file
+SAMPLE_SEED = 20261002  # --sample picks the same games every time, so a stopped pilot resumes
 LOG_NAME = "download_log.jsonl"
 TERMS_KEYS = {"approved", "note", "rate", "window"}
 
@@ -60,10 +64,10 @@ def export_path(out_dir: Path, game_id: int) -> Path:
     return out_dir / f"export_{game_id}.json"
 
 
-def user_agent(contact: Optional[str] = None, bulk: bool = False) -> str:
-    from . import ENGINE_VERSION
-    what = "bulk export download" if bulk else "small hand-picked sample"
-    return f"hanabi_data/{ENGINE_VERSION} ({what}, one request at a time" + (f"; contact: {contact})" if contact else ")")
+def sample(game_ids: Iterable[int], n: int, seed: int = SAMPLE_SEED) -> List[int]:
+    """`n` of the games at random (all of them if there are fewer), the same ones for the same IDs and seed."""
+    ids = sorted(set(game_ids))
+    return sorted(random.Random(seed).sample(ids, min(n, len(ids))))
 
 
 def parse_window(text: str) -> Window:
@@ -158,7 +162,7 @@ def _hours(seconds: float) -> str:
 
 def download(game_ids: Iterable[int], out_dir: Path, *, rate: float = DEFAULT_RATE, terms: Optional[dict] = None,
              window: Optional[str] = None, max_requests: Optional[int] = None,
-             listing: Optional[Dict[int, dict]] = None, contact: Optional[str] = CONTACT, dry_run: bool = False,
+             listing: Optional[Dict[int, dict]] = None, dry_run: bool = False,
              base_url: str = BASE_URL, log: Callable[[str], None] = print, fetch: Callable = fetch_export,
              sleep: Callable[[float], None] = time.sleep, clock: Callable[[], float] = time.monotonic,
              now: Callable[[], dt.datetime] = _utcnow) -> List[int]:
@@ -174,7 +178,6 @@ def download(game_ids: Iterable[int], out_dir: Path, *, rate: float = DEFAULT_RA
     rate = min(rate, terms.get("rate", MAX_RATE))
     windows = [parse_window(w) for w in (terms.get("window"), window) if w]
     bulk = bool(terms)
-    agent = user_agent(contact, bulk=bulk)
     ids = sorted(set(game_ids))
     todo = [g for g in ids if not export_path(out_dir, g).exists()]
     planned = todo[:max_requests] if max_requests is not None else todo
@@ -187,7 +190,7 @@ def download(game_ids: Iterable[int], out_dir: Path, *, rate: float = DEFAULT_RA
         + (f"; IDs {planned[0]}-{planned[-1]}" if planned else ""))
     log(f"{rate:g} request/s, about {_hours(len(planned) * gap * (1 + JITTER / 2))}; window: {window_text}; "
         f"terms: {'approved ' + str(terms['approved']) if bulk else 'none'}")
-    log(f"User-Agent: {agent}")
+    log(f"User-Agent: {USER_AGENT}")
     refusal = None
     if len(todo) > SMALL_RUN and not bulk:
         refusal = f"{len(todo):,} exports to fetch: more than {SMALL_RUN} needs a terms file (--terms)"
@@ -213,7 +216,7 @@ def download(game_ids: Iterable[int], out_dir: Path, *, rate: float = DEFAULT_RA
         with run_log.open("a") as f:
             f.write(json.dumps({"at": now().isoformat(timespec="seconds"), **entry}) + "\n")
 
-    record(event="start", to_fetch=len(planned), rate=rate, window=window_text, user_agent=agent,
+    record(event="start", to_fetch=len(planned), rate=rate, window=window_text, user_agent=USER_AGENT,
            terms=terms or None)
     fetched: List[int] = []
     started = last = None
@@ -232,7 +235,7 @@ def download(game_ids: Iterable[int], out_dir: Path, *, rate: float = DEFAULT_RA
             if started is None:
                 started = last
             try:
-                body = fetch(g, agent=agent, base_url=base_url)
+                body = fetch(g, agent=USER_AGENT, base_url=base_url)
                 check_export(g, body, (listing or {}).get(g))
             except DownloadError as e:
                 record(event="error", game_id=g, error=str(e), fetched=len(fetched))
@@ -268,19 +271,25 @@ def main(argv=None) -> int:
                     help=f"requests per second (default {DEFAULT_RATE}; never above the terms' rate or {MAX_RATE})")
     ap.add_argument("--window", help="only send requests in this UTC window, e.g. 08:00-13:00 (on top of the terms')")
     ap.add_argument("--max-requests", type=int, help="stop after this many requests (a pilot run)")
-    ap.add_argument("--contact", default=CONTACT, help=f"sent in the User-Agent (default: {CONTACT})")
+    ap.add_argument("--sample", type=int, metavar="N",
+                    help="only N of the listing's games, picked at random across all years (a pilot run); the "
+                         "same N every time, so the run resumes and the full run later skips them")
     ap.add_argument("--dry-run", action="store_true", help="say what would be fetched, send nothing")
     args = ap.parse_args(argv)
     if bool(args.ids) == bool(args.listing):
         ap.error("give game IDs or --listing, not both")
+    if args.sample is not None and (not args.listing or args.sample < 1):
+        ap.error("--sample needs --listing and a positive number")
     try:
         rows = None
         if args.listing:
             from .listing import in_scope, load_listing
             rows = {g: r for g, r in load_listing(args.listing).items() if in_scope(r)}
+            if args.sample is not None:
+                rows = {g: rows[g] for g in sample(rows, args.sample)}
         terms = load_terms(args.terms) if args.terms else None
         download(args.ids or rows, args.out, rate=args.rate, terms=terms, window=args.window,
-                 max_requests=args.max_requests, listing=rows, contact=args.contact, dry_run=args.dry_run)
+                 max_requests=args.max_requests, listing=rows, dry_run=args.dry_run)
     except DownloadError as e:
         print(f"stopped: {e}", file=sys.stderr)
         return 2

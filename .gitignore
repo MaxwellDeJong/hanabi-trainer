@@ -1,2 +1,3 @@
-/data/
+/data/*
+!/data/download_terms.json
 __pycache__/

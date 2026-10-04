@@ -12,7 +12,7 @@ import urllib.error
 import pytest
 
 from hanabi_data.download import (DownloadError, LOG_NAME, download, export_path, fetch_export, in_window, load_terms,
-                                  main, parse_window, user_agent)
+                                  main, parse_window, sample, USER_AGENT)
 from helpers import EXAMPLES, ROOT
 
 START = dt.datetime(2026, 10, 5, 9, 0, tzinfo=dt.timezone.utc)
@@ -129,18 +129,17 @@ def test_bulk_run_needs_terms_and_nothing_is_sent_without_them(tmp_path):
     assert run(tmp_path, range(1, 22), fetch, terms=TERMS)[0] == list(range(1, 22))
 
 
-def test_user_agents():
-    assert user_agent("harikari.live", bulk=True) == \
-        "hanabi_data/0.1.0 (bulk export download, one request at a time; contact: harikari.live)"  # as in the message
-    assert user_agent("harikari.live") == \
-        "hanabi_data/0.1.0 (small hand-picked sample, one request at a time; contact: harikari.live)"
+def test_user_agent_is_the_one_promised():
+    # word for word as in the message to the server owner; don't change one without the other
+    assert USER_AGENT == "hanabi_data/0.1.0 (bulk export download, one request at a time; contact: harikari.live)"
 
 
-def test_terms_switch_to_the_bulk_user_agent(tmp_path):
+def test_every_run_sends_the_promised_user_agent(tmp_path):
     fetch = FakeFetch()
-    run(tmp_path, [1], fetch, terms=TERMS)
-    assert fetch.agents == [user_agent("harikari.live", bulk=True)]
-    assert log_entries(tmp_path)[0]["terms"] == TERMS
+    run(tmp_path / "small", [1, 2], fetch)  # no terms
+    run(tmp_path / "bulk", [3], fetch, terms=TERMS)
+    assert fetch.agents == [USER_AGENT] * 3
+    assert log_entries(tmp_path / "bulk")[0]["terms"] == TERMS
 
 
 def test_rate_limits(tmp_path):
@@ -284,7 +283,7 @@ def test_end_to_end_against_a_local_server(tmp_path, local_server):
                        sleep=time.sleep, clock=time.clock, now=time.now, log=lambda _: None)
     assert fetched == [78822, 78921, 78922]
     assert [p for p, _ in requests] == ["/export/78822", "/export/78921", "/export/78922"]
-    assert {h["User-Agent"] for _, h in requests} == {user_agent("harikari.live", bulk=True)}
+    assert {h["User-Agent"] for _, h in requests} == {USER_AGENT}
     for g in fetched:  # saved unchanged
         assert export_path(tmp_path, g).read_bytes() == (EXAMPLES / f"export_{g}.json").read_bytes()
     with pytest.raises(DownloadError, match="HTTP 404"):
@@ -308,3 +307,25 @@ def test_cli_dry_runs(tmp_path, capsys):
         main(["1", "--listing", str(page), "--dry-run"])
     with pytest.raises(SystemExit):
         main(["--dry-run"])
+
+
+def test_sample_is_random_but_the_same_every_time():
+    ids = range(1000, 3000)
+    picked = sample(ids, 100)
+    assert len(picked) == 100 and picked == sorted(picked) and set(picked) <= set(ids)
+    assert sample(reversed(ids), 100) == picked  # depends on the IDs, not their order
+    assert picked[0] < 1200 and picked[-1] > 2800  # spread over the whole range, not the oldest first
+    assert sample(ids, 100, seed=1) != picked
+    assert sample([3, 1, 2], 10) == [1, 2, 3]
+
+
+def test_cli_sample(tmp_path, capsys):
+    page = ROOT / "tests" / "data" / "history_sample.html"
+    runs = []
+    for _ in range(2):
+        assert main(["--listing", str(page), "--sample", "2", "--out", str(tmp_path), "--dry-run"]) == 0
+        runs.append(capsys.readouterr().out)
+    assert runs[0].startswith("2 games, 0 cached, 2 to fetch") and runs[0] == runs[1]
+    for bad in (["--sample", "2", "1"], ["--listing", str(page), "--sample", "0"]):
+        with pytest.raises(SystemExit):
+            main(bad + ["--dry-run"])

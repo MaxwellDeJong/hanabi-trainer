@@ -5,6 +5,7 @@
     python3 -m hanabi_data decision examples/export_78921.json 4 --pretty   # UI turn 4
     python3 -m hanabi_data decisions game.json > decisions.jsonl
     python3 -m hanabi_data check game.json [...]
+    python3 -m hanabi_data check data/exports --listing data/history/listing.jsonl --summary   # pilot report
     python3 -m hanabi_data filters data/exports/*.json [...]           # moves the filters catch
     python3 -m hanabi_data trajectory examples/export_78921.json --seat 1 --turn 4   # printout
     python3 -m hanabi_data trajectories data/exports/*.json --out data/trajectories/hanabi-trajectory-v0
@@ -21,14 +22,14 @@ import json
 import sys
 from pathlib import Path
 
-from .check import check_record
+from .check import check_record, game_facts, summary as check_summary
 from .convert_export import from_export
 from .convert_live import from_live, parse_capture
 from .decision import decision_record, decisions, summarize
 from .filters import BY_NAME, FILTERS, firings
 from .jsonfmt import compact, pretty
 from .listing import load_listing, merge, parse_history, summary, write_listing
-from .record import load_game
+from .record import game_files, load_game
 from .rules import InvalidGame, Unsupported
 
 
@@ -66,7 +67,10 @@ def main(argv=None) -> int:
     p.add_argument("--jobs", type=int, help="worker processes (default: one per CPU)")
     p.add_argument("--per-shard", type=int, default=1000, help="trajectories per shard")
     p = sub.add_parser("check", help="validate GameRecords or exports", parents=[games])
-    p.add_argument("games", type=Path, nargs="+")
+    p.add_argument("games", type=Path, nargs="+", help="game files or directories of them")
+    p.add_argument("--summary", action="store_true",
+                   help="list only the games with problems, then a report: options, endings, problems by kind, "
+                        "and the same by year (the pilot report)")
     p = sub.add_parser("filters", help="every move the label filters catch, and totals per filter", parents=[games])
     p.add_argument("games", type=Path, nargs="+", help="duplicate game IDs are read once")
     p = sub.add_parser("listing", help="saved /history pages -> listing rows, and a summary")
@@ -106,9 +110,16 @@ def main(argv=None) -> int:
             return write_trajectories(args.games, args.out, args.per_shard, load)
         elif args.command == "corpus":
             return build_corpus(args.games, args.out, rows, args.jobs, args.per_shard)
+        elif args.command == "check" and args.summary:
+            facts = [game_facts(path, rows) for path in game_files(args.games)]
+            for f in facts:
+                if f["problems"]:
+                    print(f"{f['path']}: {'; '.join(f['problems'])}")
+            print("\n".join(([""] if any(f["problems"] for f in facts) else []) + check_summary(facts)))
+            return 1 if any(f["problems"] for f in facts) else 0
         elif args.command == "check":
             failed = 0
-            for path in args.games:
+            for path in game_files(args.games):
                 try:
                     problems = check_record(load(path))
                 except (InvalidGame, Unsupported) as e:  # a raw export that doesn't convert

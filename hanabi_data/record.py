@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
-from typing import Dict, Optional, Union
+from typing import Dict, Iterable, List, Optional, Union
 
 SCHEMA = "hanabi-game/v0"
 SERVER = "new.playhanabi.com"
@@ -33,3 +34,21 @@ def load_game(path: Union[str, Path], listing: Optional[Dict[int, dict]] = None)
         raise ValueError(f"{path}: unknown schema {doc['schema']!r}")
     from .convert_export import from_export
     return attach(from_export(doc), listing)
+
+
+def game_files(paths: Iterable[Union[str, Path]]) -> List[Path]:
+    """Files as given, directories as their `*.json`. Sorted by the game ID in the file name
+    (`export_78921.json`), so a build or check goes oldest first; ties by path."""
+    files = []
+    for p in map(Path, paths):
+        if p.is_dir():
+            files += p.glob("*.json")
+        elif p.exists():
+            files.append(p)
+        else:
+            raise ValueError(f"{p}: no such file or directory")
+
+    def key(f: Path):
+        m = re.search(r"\d+", f.stem)
+        return (int(m.group()) if m else -1, str(f))
+    return sorted(set(files), key=key)
