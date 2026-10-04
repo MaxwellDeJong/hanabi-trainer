@@ -5,14 +5,17 @@ import gzip
 import http.server
 import io
 import json
+import os
+import signal
 import socket
 import threading
 import urllib.error
 
 import pytest
 
-from hanabi_data.download import (DownloadError, LOG_NAME, download, export_path, fetch_export, in_window, load_terms,
-                                  main, parse_window, sample, USER_AGENT)
+import hanabi_data.download as download_module
+from hanabi_data.download import (DownloadError, LOG_NAME, Signalled, download, export_path, fetch_export, in_window,
+                                  load_skip, load_terms, main, parse_window, sample, USER_AGENT)
 from helpers import EXAMPLES, ROOT
 
 START = dt.datetime(2026, 10, 5, 9, 0, tzinfo=dt.timezone.utc)
@@ -64,7 +67,7 @@ class FakeTime:
         return self.start + dt.timedelta(seconds=self.t)
 
 
-def run(tmp_path, ids, fetch, time=None, **kw):
+def run(tmp_path, ids, fetch, time=None, log=None, **kw):
     time = time or FakeTime()
     lines = []
 
@@ -75,7 +78,7 @@ def run(tmp_path, ids, fetch, time=None, **kw):
         return body
 
     fetched = download(ids, tmp_path, fetch=timed_fetch, sleep=time.sleep, clock=time.clock, now=time.now,
-                       log=lines.append, **kw)
+                       log=log or lines.append, **kw)
     return fetched, time, lines
 
 
@@ -107,7 +110,7 @@ def test_stops_at_first_error_and_keeps_what_was_saved(tmp_path):
     assert fetch.calls == [1, 2]
     assert sorted(p.name for p in tmp_path.iterdir()) == [LOG_NAME, "export_1.json"]
     assert log_entries(tmp_path)[-1] == {"at": "2026-10-05T09:00:02+00:00", "event": "error", "game_id": 2,
-                                         "error": "2: HTTP 503 Service Unavailable", "fetched": 1}
+                                         "error": "2: HTTP 503 Service Unavailable", "seconds": 0.0, "fetched": 1}
 
 
 def test_interrupt_is_logged_and_the_next_run_resumes(tmp_path):
@@ -252,6 +255,22 @@ def local_server():
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
             requests.append((self.path, dict(self.headers)))
+            if self.path == "/export/503":  # an overloaded server
+                body = b"<html>upstream overloaded</html>"
+                self.send_response(503)
+                self.send_header("Retry-After", "120")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            if self.path == "/export/200":  # a maintenance page sent as a success
+                body = b"<html>down for maintenance</html>"
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
             path = EXAMPLES / f"export_{self.path.rsplit('/', 1)[-1]}.json"
             if not self.path.startswith("/export/") or not path.exists():
                 self.send_error(404)
@@ -329,3 +348,136 @@ def test_cli_sample(tmp_path, capsys):
     for bad in (["--sample", "2", "1"], ["--listing", str(page), "--sample", "0"]):
         with pytest.raises(SystemExit):
             main(bad + ["--dry-run"])
+
+
+def run_local(tmp_path, base_url, ids, **kw):
+    time = FakeTime()
+    return download(ids, tmp_path, base_url=base_url, sleep=time.sleep, clock=time.clock, now=time.now,
+                    log=lambda _: None, **kw)
+
+
+def test_http_error_logs_status_headers_timing_and_keeps_the_reply(tmp_path, local_server):
+    base_url, _ = local_server
+    with pytest.raises(DownloadError, match=r"HTTP 503 .*Retry-After: 120"):
+        run_local(tmp_path, base_url, [503])
+    start, error = log_entries(tmp_path)
+    assert start["host"] == socket.gethostname() and start["pid"] == os.getpid()
+    assert error["event"] == "error" and error["game_id"] == 503 and error["status"] == 503
+    assert error["headers"]["Retry-After"] == "120" and "seconds" in error
+    assert error["reply_bytes"] == 32 and error["reply_kept"].startswith("failed/503_")
+    assert (tmp_path / error["reply_kept"]).read_bytes() == b"<html>upstream overloaded</html>"
+
+
+def test_a_reply_that_is_not_the_export_is_kept_whole(tmp_path, local_server):
+    base_url, _ = local_server
+    with pytest.raises(DownloadError, match="not JSON"):
+        run_local(tmp_path, base_url, [200])
+    error = log_entries(tmp_path)[-1]
+    assert error["status"] == 200 and error["headers"]["Content-Type"] == "text/html"
+    assert (tmp_path / error["reply_kept"]).read_bytes() == b"<html>down for maintenance</html>"
+    assert not export_path(tmp_path, 200).exists()
+
+
+def test_an_export_that_differs_from_its_listing_row_is_kept(tmp_path):
+    listing = {1: {"players": ["x", "y"], "seed": "p2v1s1"}}
+    with pytest.raises(DownloadError, match="differ from the history page"):
+        run(tmp_path, [1], FakeFetch(), listing=listing)
+    error = log_entries(tmp_path)[-1]
+    assert (tmp_path / error["reply_kept"]).read_bytes() == export_body(1)
+
+
+def test_network_errors_name_their_kind():
+    def opener(request, timeout):
+        raise urllib.error.URLError(TimeoutError("timed out"))
+
+    with pytest.raises(DownloadError) as caught:
+        fetch_export(5, agent="ua", opener=opener)
+    assert caught.value.details == {"exception": "TimeoutError"}
+
+
+def test_an_unexpected_exception_is_logged_with_its_traceback(tmp_path):
+    with pytest.raises(RuntimeError):
+        run(tmp_path, [1, 2], FakeFetch(fail_on=2, error=RuntimeError("a bug")))
+    crash = log_entries(tmp_path)[-1]
+    assert crash["event"] == "crash" and crash["game_id"] == 2 and crash["fetched"] == 1
+    assert crash["error"] == "RuntimeError: a bug" and "Traceback" in crash["traceback"]
+
+
+def test_a_full_disk_while_saving_is_logged(tmp_path, monkeypatch):
+    def full(self, data):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(download_module.Path, "write_bytes", full)
+    with pytest.raises(OSError):
+        run(tmp_path, [1], FakeFetch())
+    crash = log_entries(tmp_path)[-1]
+    assert crash["event"] == "crash" and "No space left on device" in crash["error"]
+
+
+def test_sighup_and_sigterm_stop_the_run_cleanly(tmp_path, monkeypatch):
+    real = download_module.download
+
+    def hung_up(ids, out_dir, **kw):
+        def fetch(game_id, agent, base_url):
+            if game_id == 2:
+                os.kill(os.getpid(), signal.SIGHUP)  # the tmux pane or SSH session closes
+            return export_body(game_id)
+        time = FakeTime()
+        return real(ids, out_dir, **kw, fetch=fetch, sleep=time.sleep, clock=time.clock, now=time.now)
+
+    monkeypatch.setattr(download_module, "download", hung_up)
+    before = signal.getsignal(signal.SIGHUP)
+    assert main(["1", "2", "3", "--out", str(tmp_path)]) == 130
+    assert signal.getsignal(signal.SIGHUP) == before  # main puts the old handlers back
+    stop = log_entries(tmp_path)[-1]
+    assert stop["event"] == "stop" and stop["reason"] == "signal SIGHUP" and stop["game_id"] == 2
+    assert sorted(p.name for p in tmp_path.glob("export_*")) == ["export_1.json"]
+
+
+def test_sigterm_is_logged_as_a_stop(tmp_path):
+    with pytest.raises(Signalled):
+        run(tmp_path, [1], FakeFetch(fail_on=1, error=Signalled("signal SIGTERM")))
+    assert log_entries(tmp_path)[-1]["reason"] == "signal SIGTERM"
+
+
+def test_a_game_that_always_fails_can_be_skipped_with_a_reason(tmp_path):
+    for _ in range(2):  # without a skip, every rerun stops at the same game
+        lines = []
+        with pytest.raises(DownloadError):
+            run(tmp_path, [1, 2, 3], FakeFetch(fail_on=2), log=lines.append)
+    assert lines[-1].startswith("2: stopped after 0 this run. If 2 fails again on a rerun") and "--skip" in lines[-1]
+    fetch = FakeFetch(fail_on=2)
+    fetched, _, lines = run(tmp_path, [1, 2, 3], fetch, skip={2: "HTTP 404: deleted", 9: "not in this run"})
+    assert fetched == fetch.calls == [3]
+    assert lines[0] == "3 games, 1 cached, 1 skipped, 1 to fetch; IDs 3-3"
+    assert "2: skipped (HTTP 404: deleted)" in lines
+    start = [e for e in log_entries(tmp_path) if e["event"] == "start"][-1]
+    assert start["skipped"] == {"2": "HTTP 404: deleted"}  # only the skips that applied to this run
+
+
+def test_skip_does_not_count_towards_the_bulk_limit(tmp_path):
+    fetch = FakeFetch()
+    assert run(tmp_path, range(1, 22), fetch, skip={5: "bad"})[0] == [g for g in range(1, 22) if g != 5]
+
+
+@pytest.mark.parametrize("doc, match", [
+    ([1, 2], "expected a JSON object"),
+    ({"abc": "x"}, "not a game ID"),
+    ({"12": ""}, "needs a reason"),
+    ({"12": None}, "needs a reason"),
+])
+def test_bad_skip_files_are_refused(tmp_path, doc, match):
+    path = tmp_path / "skip.json"
+    path.write_text(json.dumps(doc))
+    with pytest.raises(DownloadError, match=match):
+        load_skip(path)
+
+
+def test_cli_skip(tmp_path, capsys):
+    page = ROOT / "tests" / "data" / "history_sample.html"
+    skip = tmp_path / "skip.json"
+    skip.write_text(json.dumps({"78921": "HTTP 404 in testing"}))
+    assert main(["--listing", str(page), "--skip", str(skip), "--out", str(tmp_path), "--dry-run"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("3 games, 0 cached, 1 skipped, 2 to fetch") and "78921: skipped (HTTP 404 in testing)" in out
+    assert "78921: would fetch" not in out

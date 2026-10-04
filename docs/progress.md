@@ -8,10 +8,12 @@ Older entries are kept as written. Where the code has since changed, the entry h
 
 ---
 
-## Current state (checked against the code 2026-10-02)
+## Current state (checked against the code 2026-10-04)
 
-`python3 -m pytest`: **204 passed**. 12 games on hand (3 in `examples/`, 10 in `data/exports/`, 78921 in
-both): 443 moves. `check` passes on all 12, and all 12 bundles match hanab.live's reducer with 0 errors.
+`python3 -m pytest`: **219 passed** on the committed data, **714** with the 110 exports on `compute` (the
+trajectory tests run on every supported export there). On `compute`: 110 exports in `data/exports/` (the 10 hand-picked plus the
+100-game random pilot). `check` passes on 109; the other (23903) uses `detrimentalCharacters`, which we leave
+out. The 12 games from before (3 in `examples/`) all match hanab.live's reducer with 0 errors.
 
 | Area | Where | State |
 |---|---|---|
@@ -20,7 +22,7 @@ both): 443 moves. `check` passes on all 12, and all 12 bundles match hanab.live'
 | **Game engine** | `hanabi_data/engine.py`, `rules.py` | Replays and validates GameRecords, full information or one player's view; every rule-based ending incl. All or Nothing, strikeout, surrender. Frozen against the retired prototype's output by `tests/data/golden_decisions.jsonl` (`meta` not compared); checked against hanab.live's reducer by `review/oracle/` |
 | **Trajectories** | `hanabi_data/trajectory.py`, `decision.views()` | `hanabi-trajectory/v0` (`representation.md` §8): one per (game, viewer seat), integer-coded numpy frames and steps, `.npz` shards + `index.jsonl`, `encode_move`/`decode_move` for every move format, `render`. CLI: `trajectory`, `trajectories`. Prefix, view and round-trip tests pass on all 12 games and the live captures. No vocabulary yet (Q14). numpy needed only for this module |
 | **Corpus build** | `hanabi_data/corpus.py` | `corpus GAMES… --out DIR [--listing] [--jobs]`: every game checked, searched by the filters and split by seed; good games → shards in `train/`, `valid/`, `test/`; `games.jsonl` says why any file was left out; `report.txt`. Parallel and deterministic, no resume (rebuild instead). On the 12 games: 10 train, 2 valid, 0 test |
-| **Downloader** | `hanabi_data/download.py` | Polite: one request at a time, oldest first, ≤0.5 request/s, cached and resumable, stops at the first problem, logs to `download_log.jsonl`. One fixed User-Agent, as promised to the owner. Bulk mode: `--listing` targets (13,966 missing, ~8 h), a terms file required past 20 missing exports, UTC window, pilot runs (`--max-requests`, `--sample`). Used once, for the 10 games in `target_games.txt`. **The owner agreed 2026-10-02** (`data/download_terms.json`, tracked); the pilot hasn't run yet |
+| **Downloader** | `hanabi_data/download.py` | Polite: one request at a time, oldest first, ≤0.5 request/s, cached and resumable, stops at the first problem, logs to `download_log.jsonl`. One fixed User-Agent, as promised to the owner. Bulk mode: `--listing` targets (13,966 missing, ~8 h), a terms file required past 20 missing exports, UTC window, pilot runs (`--max-requests`, `--sample`). Logs enough to diagnose any stop: status, headers, timing, the failed reply kept in `failed/`, a `crash` record with traceback, SIGTERM/SIGHUP stops. `--skip FILE` leaves out games that fail every time, each with a reason. Used for the 10 games in `target_games.txt` and the **100-game pilot on 2026-10-04** (no errors, replies ≤0.35 s). **The owner agreed 2026-10-02** (`data/download_terms.json`, tracked); the full run hasn't started |
 | **Move filtering** | `hanabi_data/filters.py`, `docs/label-filtering.md` | Two `candidate` filters (`play_clued_5_no_4`, `discard_clued_5_live`) and the `filters` report. None `agreed` yet, so `meta.filters` is always `[]`. On the 12 games: one catch (78922 turn 10, looks deliberate) |
 | **Review tool** | `review/` | **Inspect** (full bundle, any seat's view, checks, JSON; reached from the admin view) and **Label** (one seat per session, anonymised players, speedrun controls, moves apply at once, Tab hint, Backspace undo with replay, manual or auto-advance, the site's sounds, mismatch cue, Submit with fireworks). Several labelers: claims, board by game ID, 24-hour expiry, admin view. gzip for sharing through a tunnel. Label data in `review/labels/`: 5 submitted and 2 active sessions (test labelers), 76 labels |
 
@@ -36,14 +38,87 @@ both): 443 moves. `check` passes on all 12, and all 12 bundles match hanab.live'
 - `review-tool.md` phase 5: card notes, empathy, prioritised sampling, hosting.
 
 **Next**
-- **Pilot on `compute`** (steps in the 2026-10-02 entry): 100 random games, `check --summary`, then the
-  full run and a fresh `corpus` build.
+- **Full download on `compute`** (the pilot passed, 2026-10-04 entries): check nobody is on the server, then
+  the full run (13,866 games, ~8.1 h) in tmux with its output saved, `check --summary`, and a `corpus` build
+  (needs numpy first). Command in the logging entry.
 - The rest of **`while-waiting.md`** (open questions and code changes that need no more data).
 - Decide whether to agree the two candidate filters, and the next widening (`label-filtering.md` §7).
 - Share the review tool with a few labelers through a tunnel; decide on sign-in before hosting.
 - Capture another live game (All or Nothing, 3+ players, with an `init` message).
 - Install numpy on `compute` (only `trajectory.py` needs it; the review tool doesn't).
 - Later for trajectories: the token vocabulary (Q14) and the human-label file (`representation.md` §8.8).
+
+---
+
+## 2026-10-04 · Downloader logging, before the full run ✅
+
+So that any stop of the ~8 h run can be explained from what's on disk rather than guessed at. Before, an
+error record had only the message; a crash, a full disk or a closed terminal left no record at all; and a bad
+reply was cut to 80 bytes.
+
+| Failure | What `download_log.jsonl` now has |
+|---|---|
+| HTTP error (429, 503, …) | `error` with `status`, all reply `headers` (`Retry-After` among them), `seconds` the request took, `reply_bytes`, and `reply_kept`: the reply body saved whole (up to 1 MB) as `failed/<id>_<UTC time>.body` |
+| Not an export (HTML page with status 200, wrong game, bad gzip, players/seed differ from the listing) | the same: status, headers, timing, the reply kept in `failed/` |
+| Timeout or connection error | `error` with `exception` (e.g. `TimeoutError`, `ConnectionResetError`) and `seconds`, which tells a 30 s timeout from an instant reset |
+| Anything unexpected (a bug, a full disk while saving) | `crash` with the game ID, the error, and the full `traceback`; still raised, so it also reaches stderr. If even the log can't be written, stderr is all there is, hence `tee` below |
+| SIGHUP (tmux pane closed, SSH dropped) or SIGTERM | `stop` with `reason: "signal SIGHUP"` and the game in flight; the next run resumes. Ctrl-C stays `reason: "interrupted"` |
+| SIGKILL, power loss | can't be logged: the log ends with no `done`, `stop`, `error` or `crash`, which itself says so |
+
+Every `start` record also has `host` and `pid`. Tests: `test_download.py` +8 (each row above; the HTTP and
+HTML cases go through a local HTTP server). `test_trajectory.py` now skips exports the engine doesn't support
+(23903) and handles games ended before any move (13539 and 76008 were terminated at turn 0), both found by
+running the suite on the pilot data. pytest and numpy aren't installed on `compute`; the suite was run in a
+scratch virtualenv.
+
+Full run (in tmux, after checking nobody is on new.playhanabi.com):
+
+```bash
+python3 -m hanabi_data.download --listing data/history/listing.jsonl --terms data/download_terms.json --dry-run
+python3 -u -m hanabi_data.download --listing data/history/listing.jsonl --terms data/download_terms.json \
+  2>&1 | tee -a data/exports/download_run.txt
+```
+
+The dry run now says 13,975 in scope, 109 cached, 13,866 to fetch, about 8.1 h.
+
+**Skip file.** Because the run stops at the first problem and resumes from the oldest missing game, one game
+that fails every time (deleted, a renamed player so the listing check fails, a reply that's always odd)
+would stop every rerun at the same place. `--skip FILE` takes a JSON object of game ID → reason
+(`load_skip`: IDs only, every reason non-empty). Skipped games aren't requested, are listed in the dry run
+and the summary line ("… cached, N skipped, … to fetch"), and the `start` record has the skips that applied.
+Nothing is skipped automatically: when a game stops the run, the message says to read the log and the kept
+reply, rerun once, and only then add it with the reason. Suggested place: `data/download_skip.json` (ignored
+by `.gitignore` like the rest of `data/`, unless an exception is added as for the terms file). Then add
+`--skip data/download_skip.json` to the command above. Tests: `test_download.py` +7.
+
+---
+
+## 2026-10-04 · 100-game pilot download ✅
+
+Run on `compute` after checking by hand that nobody was on new.playhanabi.com. The dry run showed what we
+expected (100 sampled games, IDs 12434–79049, 0 cached, 0.5 request/s, the agreed User-Agent, terms approved
+2026-10-02), then the real run took 18:27:50–18:31:18 UTC: **100 saved, no errors, no retries**. Replies took
+0.23 s on average, 0.35 s at most (`data/exports/download_log.jsonl`).
+
+`check data/exports --listing data/history/listing.jsonl --summary`, over all 110 exports (the 10 we had + 100):
+
+| | |
+|---|---|
+| Pass | **109 of 110**. The one failure is 23903 (2022): `Unsupported: options ['detrimentalCharacters']` |
+| Variants | 6 Suits 91 · No Variant 19 |
+| Players | 2p 44 · 3p 43 · 4p 22 · 5p 1 |
+| Endings | speedrun_fail 39 · terminated_by_player 36 · strikeout 25 · normal 7 · won 5 · all_or_nothing_fail 2 |
+| Options | `speedrun` on all 100 sampled games; `allOrNothing` 10; `timed` (timeBase 5, timePerTurn 1) 9, all 2026; `detrimentalCharacters` 1 |
+| Deck out | 7 games; play went on past a round in 1 (78742, the 3 turns already known; it passes). No new RQ10 example |
+| By year | 2022–2026: 29/14/13/17/36 games. No year stands out apart from the 9 timed All or Nothing games in 2026 |
+| No listing row | 78663 only (known) |
+
+**Decision: games with `detrimentalCharacters` are left out.** We rarely play with it, so the engine won't
+support it. Nothing new is needed: the listing doesn't record options, so the download still fetches these
+games, but the converters raise `Unsupported` and `corpus` already leaves such games out with reason
+`unsupported` (`representation.md` §4).
+
+numpy isn't installed on `compute` yet, so `corpus` fails on import there; `check` doesn't need it.
 
 ---
 

@@ -2,7 +2,7 @@
 form the repo uses, storage, and the derived fields.
 
 Runs on the example games, plus every export downloaded to data/exports/ (not committed, so those
-cases only run where the data is).
+cases only run where the data is) that the engine supports: the corpus leaves the others out too.
 """
 from collections import Counter
 from functools import lru_cache
@@ -14,7 +14,7 @@ from hanabi_data import from_export, from_live, parse_capture
 from hanabi_data.decision import views
 from hanabi_data.engine import ACTIONS
 from hanabi_data.record import load_game, player_view
-from hanabi_data.rules import COPIES, SUIT_LETTERS
+from hanabi_data.rules import COPIES, SUIT_LETTERS, Unsupported
 from hanabi_data.trajectory import (CRITICAL, FRAME_FIELDS, MAX_SEATS, MAX_SLOTS, MISPLAY_RUN_TO_END, NONE,
                                     NOT_INPUT, PLAYABLE, STEP_FIELDS, TRASH, UNKNOWN, decode_frame,
                                     decode_legal, decode_move, encode_move, load_shard, read_shards, render,
@@ -24,6 +24,17 @@ from helpers import EXAMPLES, GAMES, ROOT, load_export, make_export, rank_clue, 
 PATHS = {g: EXAMPLES / f"export_{g}.json" for g in GAMES}
 for _p in sorted((ROOT / "data" / "exports").glob("export_*.json")):
     PATHS.setdefault(_p.stem.split("_", 1)[1], _p)
+
+
+def _supported(path):
+    try:
+        load_game(path)
+        return True
+    except Unsupported:  # e.g. detrimentalCharacters (23903)
+        return False
+
+
+PATHS = {g: p for g, p in PATHS.items() if _supported(p)}
 IDS = sorted(PATHS, key=int)
 STEP_KEYS = ("actor", "type", "slot", "target", "value")
 
@@ -158,7 +169,7 @@ def test_prefix(gid):
     T = len(actions(rec))
     for seat in seats(gid):
         full = traj(gid, seat)
-        for k in sorted({0, 1, T // 3, T // 2, T - 1}):
+        for k in sorted({0, 1, T // 3, T // 2, T - 1} & set(range(T + 1))):  # T is 0 if it ended before any move
             part = trajectory(truncate(rec, k), seat)
             assert part.n_steps == k
             assert_same(part.frames, full.frames)
