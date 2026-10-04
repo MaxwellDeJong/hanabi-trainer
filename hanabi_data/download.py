@@ -9,7 +9,14 @@
 - more than SMALL_RUN missing exports (a bulk run) needs a terms file: what the server owner agreed to
   (§3.1). Without one the run refuses to start. A terms file can also set a rate ceiling and a time
   window (UTC) outside which no request is sent
-- every request and every stop is appended to `download_log.jsonl` in the output folder
+- every request and every stop is appended to `download_log.jsonl` in the output folder. An error record
+  has the HTTP status, the reply's headers and how long the request took, and the reply itself is kept in
+  `failed/` next to the exports. Anything unexpected (a full disk, a bug) gets a `crash` record with the
+  traceback; SIGTERM and SIGHUP (a closed tmux pane, a dropped SSH session) a `stop` record. A log that ends
+  without `done`, `stop`, `error` or `crash` means the process was killed outright (SIGKILL, power loss)
+- a game that fails every time (deleted, or not matching the history page) would stop every rerun at the same
+  place, so a skip file (`--skip`) lists games to leave out, each with the reason, decided by a person after
+  reading the error. Nothing is skipped automatically
 
     python3 -m hanabi_data.download 78738 78742 --dry-run
     python3 -m hanabi_data.download 78738 78742
@@ -23,6 +30,10 @@ A terms file (JSON; only `approved` is required):
      "note": "reply to the message of 2026-09-30",
      "rate": 0.5,                               # requests per second, a ceiling for every run
      "window": "08:00-13:00"}                   # UTC; may wrap past midnight ("22:00-03:00")
+
+A skip file (JSON; game ID -> why it's left out):
+
+    {"23456": "HTTP 404 on 2026-10-05: the game was deleted (failed/23456_20261005T031522Z.body)"}
 """
 from __future__ import annotations
 
@@ -32,8 +43,11 @@ import gzip
 import json
 import os
 import random
+import signal
+import socket
 import sys
 import time
+import traceback
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -51,13 +65,23 @@ JITTER = 0.1  # each gap is 1/rate times 1 to 1 + JITTER
 SMALL_RUN = 20  # more missing exports than this need a terms file
 SAMPLE_SEED = 20261002  # --sample picks the same games every time, so a stopped pilot resumes
 LOG_NAME = "download_log.jsonl"
+FAILED_DIR = "failed"  # replies that weren't a good export, kept whole for diagnosis
+MAX_KEPT_BODY = 1 << 20  # bytes of a failed reply kept on disk
 TERMS_KEYS = {"approved", "note", "rate", "window"}
 
 Window = Tuple[dt.time, dt.time]
 
 
 class DownloadError(Exception):
-    pass
+    """A problem that stops the run. `details` says what the server sent, for the log: `status`, `headers`,
+    `body` (the raw reply), `exception` (the network error's type)."""
+    def __init__(self, message: str, **details):
+        super().__init__(message)
+        self.details = details
+
+
+class Signalled(KeyboardInterrupt):
+    """SIGTERM or SIGHUP, handled like Ctrl-C: logged, and the next run resumes."""
 
 
 def export_path(out_dir: Path, game_id: int) -> Path:
@@ -140,16 +164,46 @@ def fetch_export(game_id: int, *, agent: str, base_url: str = BASE_URL, timeout:
         "User-Agent": agent, "Accept": "application/json", "Accept-Encoding": "gzip"})
     try:
         with opener(request, timeout=timeout) as resp:
-            body = resp.read()
-            if resp.headers.get("Content-Encoding") == "gzip":
-                body = gzip.decompress(body)
+            reply = {"status": getattr(resp, "status", None), "headers": _headers(resp.headers)}
+            raw = resp.read()
     except urllib.error.HTTPError as e:
         retry = e.headers.get("Retry-After") if e.headers else None
-        raise DownloadError(f"{game_id}: HTTP {e.code} {e.reason}" + (f" (Retry-After: {retry})" if retry else "")) from e
+        raise DownloadError(f"{game_id}: HTTP {e.code} {e.reason}" + (f" (Retry-After: {retry})" if retry else ""),
+                            status=e.code, headers=_headers(e.headers), body=_error_body(e)) from e
     except (urllib.error.URLError, OSError) as e:  # includes timeouts
-        raise DownloadError(f"{game_id}: {e}") from e
-    check_export(game_id, body)
+        cause = e.reason if isinstance(e, urllib.error.URLError) and isinstance(e.reason, BaseException) else e
+        raise DownloadError(f"{game_id}: {e}", exception=type(cause).__name__) from e
+    body = raw
+    if reply["headers"].get("Content-Encoding") == "gzip":
+        try:
+            body = gzip.decompress(raw)
+        except (OSError, EOFError) as e:
+            raise DownloadError(f"{game_id}: the gzipped reply doesn't decompress: {e}", body=raw, **reply) from e
+    try:
+        check_export(game_id, body)
+    except DownloadError as e:
+        e.details.update(reply, body=body)
+        raise
     return body
+
+
+def _headers(headers) -> Dict[str, str]:
+    return dict(headers.items()) if headers else {}
+
+
+def _error_body(e: urllib.error.HTTPError) -> Optional[bytes]:
+    try:
+        return e.read(MAX_KEPT_BODY + 1)
+    except Exception:  # the connection may be gone already; the status and headers are still logged
+        return None
+
+
+def _keep_reply(out_dir: Path, game_id: int, body: bytes, at: dt.datetime) -> str:
+    """Saves a failed reply as failed/<id>_<UTC time>.body and returns that path, relative to `out_dir`."""
+    path = out_dir / FAILED_DIR / f"{game_id}_{at:%Y%m%dT%H%M%SZ}.body"
+    path.parent.mkdir(exist_ok=True)
+    path.write_bytes(body[:MAX_KEPT_BODY])
+    return str(path.relative_to(out_dir))
 
 
 def _utcnow() -> dt.datetime:
@@ -160,9 +214,27 @@ def _hours(seconds: float) -> str:
     return f"{seconds / 3600:.1f} h" if seconds >= 3600 else f"{seconds / 60:.0f} min"
 
 
+def load_skip(path: Path) -> Dict[int, str]:
+    """The skip file, checked: game IDs as keys, each with a non-empty reason."""
+    try:
+        doc = json.loads(Path(path).read_text())
+    except (OSError, ValueError) as e:
+        raise DownloadError(f"skip file {path}: {e}") from None
+    if not isinstance(doc, dict):
+        raise DownloadError(f"skip file {path}: expected a JSON object of game ID -> reason")
+    skip = {}
+    for key, reason in doc.items():
+        if not key.isdigit():
+            raise DownloadError(f"skip file {path}: {key!r} is not a game ID")
+        if not isinstance(reason, str) or not reason.strip():
+            raise DownloadError(f"skip file {path}: game {key} needs a reason")
+        skip[int(key)] = reason
+    return skip
+
+
 def download(game_ids: Iterable[int], out_dir: Path, *, rate: float = DEFAULT_RATE, terms: Optional[dict] = None,
              window: Optional[str] = None, max_requests: Optional[int] = None,
-             listing: Optional[Dict[int, dict]] = None, dry_run: bool = False,
+             skip: Optional[Dict[int, str]] = None, listing: Optional[Dict[int, dict]] = None, dry_run: bool = False,
              base_url: str = BASE_URL, log: Callable[[str], None] = print, fetch: Callable = fetch_export,
              sleep: Callable[[float], None] = time.sleep, clock: Callable[[], float] = time.monotonic,
              now: Callable[[], dt.datetime] = _utcnow) -> List[int]:
@@ -179,18 +251,23 @@ def download(game_ids: Iterable[int], out_dir: Path, *, rate: float = DEFAULT_RA
     windows = [parse_window(w) for w in (terms.get("window"), window) if w]
     bulk = bool(terms)
     ids = sorted(set(game_ids))
-    todo = [g for g in ids if not export_path(out_dir, g).exists()]
+    missing = [g for g in ids if not export_path(out_dir, g).exists()]
+    skipped = {g: skip[g] for g in missing if g in (skip or {})}
+    todo = [g for g in missing if g not in skipped]
     planned = todo[:max_requests] if max_requests is not None else todo
     gap = 1 / rate
     open_now = all(in_window(w, now()) for w in windows)
     window_text = " and ".join(f"{a:%H:%M}-{b:%H:%M}" for a, b in windows) + " UTC" if windows else "any time"
 
-    log(f"{len(ids):,} games, {len(ids) - len(todo):,} cached, {len(todo):,} to fetch"
+    log(f"{len(ids):,} games, {len(ids) - len(missing):,} cached, "
+        + (f"{len(skipped):,} skipped, " if skipped else "") + f"{len(todo):,} to fetch"
         + (f" (this run: the first {len(planned):,})" if len(planned) < len(todo) else "")
         + (f"; IDs {planned[0]}-{planned[-1]}" if planned else ""))
     log(f"{rate:g} request/s, about {_hours(len(planned) * gap * (1 + JITTER / 2))}; window: {window_text}; "
         f"terms: {'approved ' + str(terms['approved']) if bulk else 'none'}")
     log(f"User-Agent: {USER_AGENT}")
+    for g, reason in skipped.items():
+        log(f"{g}: skipped ({reason})")
     refusal = None
     if len(todo) > SMALL_RUN and not bulk:
         refusal = f"{len(todo):,} exports to fetch: more than {SMALL_RUN} needs a terms file (--terms)"
@@ -217,9 +294,11 @@ def download(game_ids: Iterable[int], out_dir: Path, *, rate: float = DEFAULT_RA
             f.write(json.dumps({"at": now().isoformat(timespec="seconds"), **entry}) + "\n")
 
     record(event="start", to_fetch=len(planned), rate=rate, window=window_text, user_agent=USER_AGENT,
-           terms=terms or None)
+           terms=terms or None, skipped={str(g): r for g, r in skipped.items()} or None,
+           host=socket.gethostname(), pid=os.getpid())
     fetched: List[int] = []
     started = last = None
+    g = None
     try:
         for i, g in enumerate(planned):
             if last is not None:
@@ -234,11 +313,26 @@ def download(game_ids: Iterable[int], out_dir: Path, *, rate: float = DEFAULT_RA
             last = clock()
             if started is None:
                 started = last
+            body = None
             try:
                 body = fetch(g, agent=USER_AGENT, base_url=base_url)
                 check_export(g, body, (listing or {}).get(g))
             except DownloadError as e:
-                record(event="error", game_id=g, error=str(e), fetched=len(fetched))
+                seconds = round(clock() - last, 3)
+                details = dict(e.details)
+                if body is not None:  # a good export of the wrong game (the listing check)
+                    details.setdefault("body", body)
+                reply = details.pop("body", None)
+                if reply is not None:
+                    details["reply_bytes"] = len(reply)
+                    try:
+                        details["reply_kept"] = _keep_reply(out_dir, g, reply, now())
+                    except OSError as keep_error:
+                        details["reply_not_kept"] = str(keep_error)
+                record(event="error", game_id=g, error=str(e), seconds=seconds, **details, fetched=len(fetched))
+                log(f"{g}: stopped after {len(fetched):,} this run. If {g} fails again on a rerun, read the log"
+                    f"{' and ' + details['reply_kept'] if 'reply_kept' in details else ''}, then add it to a skip "
+                    f"file (--skip) with the reason to go past it")
                 raise
             path = export_path(out_dir, g)
             part = path.with_name(path.name + ".part")
@@ -250,9 +344,19 @@ def download(game_ids: Iterable[int], out_dir: Path, *, rate: float = DEFAULT_RA
             pace = (clock() - started) / len(fetched)
             log(f"{g}: saved ({len(body):,} bytes); {len(fetched):,}/{len(planned):,}"
                 + (f", about {_hours(left * max(pace, gap))} left" if left else ""))
-    except KeyboardInterrupt:
-        record(event="stop", reason="interrupted", fetched=len(fetched))
-        log(f"interrupted: {len(fetched):,} fetched this run. Run the same command again to resume")
+    except KeyboardInterrupt as e:
+        reason = str(e) if isinstance(e, Signalled) else "interrupted"
+        record(event="stop", reason=reason, game_id=g, fetched=len(fetched))
+        log(f"{reason}: {len(fetched):,} fetched this run. Run the same command again to resume")
+        raise
+    except DownloadError:
+        raise  # logged above
+    except Exception as e:
+        try:
+            record(event="crash", game_id=g, error=f"{type(e).__name__}: {e}", traceback=traceback.format_exc(),
+                   fetched=len(fetched))
+        except Exception:
+            pass  # e.g. the disk is full; the traceback still reaches stderr
         raise
     record(event="done", fetched=len(fetched))
     return fetched
@@ -274,12 +378,18 @@ def main(argv=None) -> int:
     ap.add_argument("--sample", type=int, metavar="N",
                     help="only N of the listing's games, picked at random across all years (a pilot run); the "
                          "same N every time, so the run resumes and the full run later skips them")
+    ap.add_argument("--skip", type=Path, help="games to leave out, each with the reason (JSON: ID -> reason)")
     ap.add_argument("--dry-run", action="store_true", help="say what would be fetched, send nothing")
     args = ap.parse_args(argv)
     if bool(args.ids) == bool(args.listing):
         ap.error("give game IDs or --listing, not both")
     if args.sample is not None and (not args.listing or args.sample < 1):
         ap.error("--sample needs --listing and a positive number")
+    def on_signal(signum, _frame):
+        raise Signalled(f"signal {signal.Signals(signum).name}")
+
+    signums = [getattr(signal, n) for n in ("SIGTERM", "SIGHUP") if hasattr(signal, n)]
+    previous = {s: signal.signal(s, on_signal) for s in signums}
     try:
         rows = None
         if args.listing:
@@ -288,13 +398,17 @@ def main(argv=None) -> int:
             if args.sample is not None:
                 rows = {g: rows[g] for g in sample(rows, args.sample)}
         terms = load_terms(args.terms) if args.terms else None
+        skip = load_skip(args.skip) if args.skip else None
         download(args.ids or rows, args.out, rate=args.rate, terms=terms, window=args.window,
-                 max_requests=args.max_requests, listing=rows, dry_run=args.dry_run)
+                 max_requests=args.max_requests, skip=skip, listing=rows, dry_run=args.dry_run)
     except DownloadError as e:
         print(f"stopped: {e}", file=sys.stderr)
         return 2
     except KeyboardInterrupt:
         return 130
+    finally:
+        for s, handler in previous.items():
+            signal.signal(s, handler)
     return 0
 
 
