@@ -34,7 +34,7 @@ and haven't started yet.*
 1. **Collect games.** Game exports come from [new.playhanabi.com](https://new.playhanabi.com), a server
    running the Hanabi Live codebase. `hanabi_data/download.py` fetches exports
    politely (one request at a time, at most 0.5 per second, cached on disk). A bulk run needs a terms file
-   recording the server owner's permission, which hasn't been given yet.
+   recording the server owner's permission: `data/download_terms.json` (given 2026-10-02).
 2. **Convert to a GameRecord.** An event log that is the hand-off format for both recorded games and live
    games. In a live game the player's own cards are unknown, so identities may be `null`.
 3. **Replay with a rules engine.** A deterministic Python engine replays every record and rejects anything

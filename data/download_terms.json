@@ -1,0 +1,5 @@
+{
+  "approved": "2026-10-02",
+  "note": "Server owner agreed to option 1 of message_to_server_owner.md (scripted /export download, one request at a time) at 0.5 request/s; his only wish: don't crash the server. No fixed window: start a run only after checking by hand that nobody else is using new.playhanabi.com.",
+  "rate": 0.5
+}

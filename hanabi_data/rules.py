@@ -20,6 +20,10 @@ DEFAULT_VARIANT = "No Variant"
 
 # Options that change the rules in ways the engine does not implement.
 UNSUPPORTED_OPTIONS = ("cardCycle", "deckPlays", "emptyClues", "detrimentalCharacters")
+# Options `Rules.from_site_options` reads, and the timer settings, which don't change the rules (§2). Any other
+# option is ignored silently, so `check --summary` lists it.
+KNOWN_OPTIONS = frozenset({"variant", "variantName", "allOrNothing", "speedrun", "startingPlayer", "oneExtraCard",
+                           "oneLessCard", "timed", "timeBase", "timePerTurn", *UNSUPPORTED_OPTIONS})
 
 Identity = Tuple[int, int]  # (suit index, rank)
 
