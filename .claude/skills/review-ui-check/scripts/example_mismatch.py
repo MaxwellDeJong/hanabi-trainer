@@ -1,6 +1,6 @@
 """Worked example: in Label mode, make moves that differ from the recorded ones and screenshot the result.
 
-    python3 example_mismatch.py <base-url> <scratch-dir> [game_id]
+    uv run python example_mismatch.py <base-url> <scratch-dir> [game_id]
 
 Copy it as a starting point for a new check: it shows session setup, picking a move from the recorded
 actions, clicking cards, pressing keys, timing screenshots around an animation, and asserting on DOM

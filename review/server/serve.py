@@ -1,6 +1,6 @@
 """Local server for the review tool: the bundle API plus the built web app.
 
-    python3 review/server/serve.py [--port 8765] [--mute]
+    uv run python review/server/serve.py [--port 8765] [--mute]
 
 Serves review/web/dist (build it with `npm run build` in review/) and:
     GET  /api/games                         one summary per bundle in review/build/bundles

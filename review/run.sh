@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 [ -f review/vendor/hanabi-game.mjs ] && [ -d review/node_modules ] \
   && [ -f review/vendor/hanabi-live/public/sounds/turn-us.mp3 ] || bash review/setup.sh
 shopt -s nullglob  # data/exports/ is not committed and may be empty
-python3 review/server/bundle.py examples/export_*.json data/exports/export_*.json \
+uv run python review/server/bundle.py examples/export_*.json data/exports/export_*.json \
   || echo "!! some checks failed (see the Checks button)"
 npm --prefix review run -s build >/dev/null
-exec python3 review/server/serve.py "$@"
+exec uv run python review/server/serve.py "$@"

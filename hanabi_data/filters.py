@@ -2,7 +2,7 @@
 
 A filter marks a move whose label is bad under every identity the actor's clue knowledge allows,
 so it holds whatever conventions the group uses. Filters start as `candidate`: they are explored on
-real games (`python3 -m hanabi_data filters ...`) and only become `agreed` once every move they
+real games (`uv run python -m hanabi_data filters ...`) and only become `agreed` once every move they
 catch has been looked at. Only agreed filters appear in a decision record's `meta.filters`.
 
 Filters start as narrow as possible and are widened one at a time, because the group does sometimes

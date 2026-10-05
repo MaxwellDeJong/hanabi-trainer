@@ -30,7 +30,7 @@ pretraining corpus needs a way to drop **individual** obviously bad moves.
 |---|---|---|---|
 | D1 | 2026-09-25 | **Provably bad moves only, for now.** A filter catches a move only if it is bad under every identity the actor's information allows. It judges the decision, not the outcome: a lucky blind play isn't caught, and neither is an unlucky but reasonable one | There's no convention write-up yet, and conventions have changed over time. Rules-based facts hold whatever convention was in use |
 | D2 | 2026-09-25 | **Start with the strictest conditions and widen one step at a time.** Each widening is explored on real games before it's agreed | The group sometimes plays a card it knows is unplayable **on purpose** (situationally). So even a provably unplayable play isn't always a bad label |
-| D3 | 2026-09-25 | **Candidate → agreed.** A new filter is a `candidate`. `python3 -m hanabi_data filters <games>` lists every move it catches. Once those moves have been looked at, the filter can become `agreed`. Only agreed filters appear in `meta.filters` | A candidate must never reach a training corpus by accident |
+| D3 | 2026-09-25 | **Candidate → agreed.** A new filter is a `candidate`. `uv run python -m hanabi_data filters <games>` lists every move it catches. Once those moves have been looked at, the filter can become `agreed`. Only agreed filters appear in `meta.filters` | A candidate must never reach a training corpus by accident |
 | D4 | 2026-09-25 | **No "suspicious move" flags yet.** They're wanted, but the design is open (Q2) | The root cause of a bomb takes interpretation. Automatic blame would often point at the wrong player (§4) |
 | D5 | 2026-09-25 | **Clue ≠ play.** No filter may assume a clued card is meant to be played | A 1 clue can touch a card the cluer knows will bomb. A 1 clue after all 1s are played marks trash |
 | D6 | 2026-09-25 | **Weighting is decided at training time.** This repo only stores enough metadata (score, result, …) to derive a weight | Keeps policy out of the data pipeline |
@@ -55,7 +55,7 @@ only because every other rank was ruled out isn't caught (see W1).
 
 1. Add it to `FILTERS` in `filters.py` with status `candidate`, plus tests: one where it fires, and one
    for each edge case where it mustn't.
-2. Run `python3 -m hanabi_data filters data/exports/*.json`. Each caught move is printed with its
+2. Run `uv run python -m hanabi_data filters data/exports/*.json`. Each caught move is printed with its
    board state and a review-tool Inspect link (`#/game/<id>/<turn>?pov=<seat>`), then totals per filter,
    including how many catches fall inside a final misplay run (§5). Duplicate game IDs are read once.
 3. Look at the caught moves. Especially look for deliberate plays that aren't throw-aways (D2).
@@ -172,7 +172,7 @@ This document created. §10 of `representation.md` moved here.
 ### 2026-09-25 · First two candidate filters
 
 - `hanabi_data/filters.py`: `play_clued_5_no_4` and `discard_clued_5_live`, both candidates.
-- `python3 -m hanabi_data filters <games>`: the report described in §3.1.
+- `uv run python -m hanabi_data filters <games>`: the report described in §3.1.
 - `meta.filters` (agreed only, so `[]` for now). `examples/decision_78921_turn4.json` regenerated.
 - `tests/test_filters.py` (9 tests): each filter fires, and doesn't when a possible suit is at 4 (play)
   or dead (discard). Only agreed filters reach `meta`. `python3 -m pytest`: 93 passed.

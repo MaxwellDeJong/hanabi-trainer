@@ -34,7 +34,7 @@ available, and `scripts/cdp.py` is a small driver built on them.
    session setup, choosing a move from the recorded actions, clicks, keys, animation timing and
    assertions. Keep its import block: it finds `cdp.py` from the repo when the script isn't in
    `scripts/`. Write it with the Write tool, then run it from the repo root:
-   `python3 <scratchpad>/uicheck/check.py http://127.0.0.1:8799 <scratchpad>/uicheck`.
+   `uv run python <scratchpad>/uicheck/check.py http://127.0.0.1:8799 <scratchpad>/uicheck`.
 4. **Read the screenshots** in `<scratch>/shots/` with the Read tool. A blank or "Loading…" frame
    means the check failed, even if the script printed "ok". Also check `b.errors`, which collects
    uncaught exceptions and `console.error` calls.

@@ -18,11 +18,11 @@
   place, so a skip file (`--skip`) lists games to leave out, each with the reason, decided by a person after
   reading the error. Nothing is skipped automatically
 
-    python3 -m hanabi_data.download 78738 78742 --dry-run
-    python3 -m hanabi_data.download 78738 78742
-    python3 -m hanabi_data.download --listing data/history/listing.jsonl --dry-run
-    python3 -m hanabi_data.download --listing data/history/listing.jsonl --terms data/download_terms.json --sample 100
-    python3 -m hanabi_data.download --listing data/history/listing.jsonl --terms data/download_terms.json
+    uv run python -m hanabi_data.download 78738 78742 --dry-run
+    uv run python -m hanabi_data.download 78738 78742
+    uv run python -m hanabi_data.download --listing data/history/listing.jsonl --dry-run
+    uv run python -m hanabi_data.download --listing data/history/listing.jsonl --terms data/download_terms.json --sample 100
+    uv run python -m hanabi_data.download --listing data/history/listing.jsonl --terms data/download_terms.json
 
 A terms file (JSON; only `approved` is required):
 
@@ -363,7 +363,7 @@ def download(game_ids: Iterable[int], out_dir: Path, *, rate: float = DEFAULT_RA
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(prog="python3 -m hanabi_data.download", description=__doc__,
+    ap = argparse.ArgumentParser(prog="uv run python -m hanabi_data.download", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("ids", type=int, nargs="*", help="game IDs (or use --listing)")
     ap.add_argument("--listing", type=Path,

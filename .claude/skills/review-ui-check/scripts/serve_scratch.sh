@@ -36,7 +36,7 @@ mkdir -p "$labels"
 npm --prefix "$repo/review" run -s build >/dev/null
 
 log="$scratch/serve-$port.log"
-nohup python3 "$repo/review/server/serve.py" --port "$port" --labels "$labels" $mute >"$log" 2>&1 &
+nohup uv run --project "$repo" python "$repo/review/server/serve.py" --port "$port" --labels "$labels" $mute >"$log" 2>&1 &
 if ! timeout 30 bash -c "until curl -sf http://127.0.0.1:$port/api/games >/dev/null; do sleep 0.5; done"; then
   echo "server did not come up; see $log" >&2
   exit 1

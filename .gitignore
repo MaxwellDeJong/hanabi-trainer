@@ -1,3 +1,4 @@
 /data/*
 !/data/download_terms.json
 __pycache__/
+.venv/

@@ -60,7 +60,7 @@ Out of scope for this repo: the models, training, and the live client that plays
 
 | Path | What it is |
 |---|---|
-| `hanabi_data/` | Python package: converters, rules engine, decision records, label filters, downloader. Python 3.9+ and numpy |
+| `hanabi_data/` | Python package: converters, rules engine, decision records, label filters, downloader. Python 3.9+ and numpy; managed with [uv](https://docs.astral.sh/uv/) (`pyproject.toml`, `uv.lock`) |
 | `review/` | The review and labeling tool: a local Python server and a TypeScript/Vite web app. See [`review/README.md`](review/README.md) |
 | `docs/` | Design documents: [`representation.md`](docs/representation.md) (data format and rules), [`review-tool.md`](docs/review-tool.md), [`label-filtering.md`](docs/label-filtering.md) |
 | `examples/` | Real game exports and live captures used by the tests and docs. See [`examples/README.md`](examples/README.md) |
@@ -68,19 +68,28 @@ Out of scope for this repo: the models, training, and the live client that plays
 
 ## Quick start
 
+Python dependencies are managed with [uv](https://docs.astral.sh/uv/). `uv sync` creates `.venv/`
+with the package, numpy and the dev tools (pytest, pytest-xdist) at the versions in `uv.lock`, using the
+Python pinned in `.python-version`; `uv run` keeps it in sync before each command.
+
 ```bash
+uv sync
+
 # Decision record for UI turn 4 of an example game
-python3 -m hanabi_data decision examples/export_78921.json 4 --pretty
+uv run python -m hanabi_data decision examples/export_78921.json 4 --pretty
 
 # Every decision record of a game, one JSON per line
-python3 -m hanabi_data decisions examples/export_78921.json > decisions.jsonl
+uv run python -m hanabi_data decisions examples/export_78921.json > decisions.jsonl
 
 # Validate games, and list the moves the label filters catch
-python3 -m hanabi_data check examples/export_*.json
-python3 -m hanabi_data filters examples/export_*.json
+uv run python -m hanabi_data check examples/export_*.json
+uv run python -m hanabi_data filters examples/export_*.json
 
-# Tests
-python3 -m pytest
+# Tests (-n auto runs them in parallel; the suite covers every export in data/exports/)
+uv run pytest -n auto
+
+# Add a dependency (--dev for tools only needed in development)
+uv add <package>
 
 # Review tool (needs Node.js; the first run fetches Hanabi Live's source and installs npm packages)
 bash review/run.sh    # then open http://127.0.0.1:8765/

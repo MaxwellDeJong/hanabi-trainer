@@ -282,17 +282,17 @@ variant other than "No Variant" and "6 Suits", and the options `cardCycle`, `dec
 | `trajectory.py` | The adapter (§8.8): `trajectory(record, viewer)`, `encode_move`/`decode_move`, `write_shards`/`read_shards`/`load_shard`, `render`. The only module that imports numpy, and `__init__.py` doesn't import it, so the rest of the package (and the review tool) runs without numpy. Later: the reference vocabulary |
 
 ```bash
-python3 -m hanabi_data decision examples/export_78921.json 4 --pretty   # UI turn 4
-python3 -m hanabi_data convert-export export.json > game.json
-python3 -m hanabi_data convert-live capture.txt --players a,b
-python3 -m hanabi_data decisions game.json > decisions.jsonl
-python3 -m hanabi_data check game.json ...
-python3 -m hanabi_data filters data/exports/*.json                                # moves the filters catch
-python3 -m hanabi_data trajectory examples/export_78921.json --seat 1 --turn 4    # one seat's frames, readable
-python3 -m hanabi_data trajectories data/exports/*.json --out data/trajectories/hanabi-trajectory-v0
-python3 -m hanabi_data listing data/history/*.html --out data/history/listing.jsonl   # parse saved history pages
-python3 -m hanabi_data check --listing data/history/listing.jsonl data/exports/*.json # any game command takes --listing
-python3 -m pytest                                                                  # tests/
+uv run python -m hanabi_data decision examples/export_78921.json 4 --pretty   # UI turn 4
+uv run python -m hanabi_data convert-export export.json > game.json
+uv run python -m hanabi_data convert-live capture.txt --players a,b
+uv run python -m hanabi_data decisions game.json > decisions.jsonl
+uv run python -m hanabi_data check game.json ...
+uv run python -m hanabi_data filters data/exports/*.json                                # moves the filters catch
+uv run python -m hanabi_data trajectory examples/export_78921.json --seat 1 --turn 4    # one seat's frames, readable
+uv run python -m hanabi_data trajectories data/exports/*.json --out data/trajectories/hanabi-trajectory-v0
+uv run python -m hanabi_data listing data/history/*.html --out data/history/listing.jsonl   # parse saved history pages
+uv run python -m hanabi_data check --listing data/history/listing.jsonl data/exports/*.json # any game command takes --listing
+uv run python -m pytest                                                                  # tests/
 ```
 
 Python 3.9. numpy is the one dependency (since 2026-09-26, for trajectories), and may be used freely,
@@ -608,7 +608,7 @@ data/trajectories/hanabi-trajectory-v0/          (derived, not committed; regene
   *Measured 2026-09-30:* 307 bytes per frame uncompressed; the 12 games on hand (31 trajectories, 1,190
   frames) make a 47 KB shard, about 40 bytes per frame.
 - **numpy is a dependency** of the package (`pyproject.toml`), and tests use it freely.
-- **The corpus** (`python3 -m hanabi_data corpus`, `corpus.py`, added 2026-10-01) is three such directories,
+- **The corpus** (`uv run python -m hanabi_data corpus`, `corpus.py`, added 2026-10-01) is three such directories,
   `train/`, `valid/` and `test/` (split by seed, §10), plus `games.jsonl` (each input file's status, split,
   problems and filter catches) and `report.txt`. A game goes in only if it passes every §10 check.
 
@@ -699,7 +699,7 @@ it, and a test (`tests/test_worked_example.py`) keeps this block, the file
 `examples/decision_78921_turn4.json` and the engine's output identical. To regenerate it:
 
 ```bash
-python3 -m hanabi_data decision examples/export_78921.json 4 --pretty
+uv run python -m hanabi_data decision examples/export_78921.json 4 --pretty
 ```
 
 ```json
@@ -892,7 +892,7 @@ Things to note:
 ## 10. Validation, size and storage
 
 All of these are implemented: the engine raises `InvalidGame` while replaying, and `check_record` (or
-`python3 -m hanabi_data check`) runs the rest.
+`uv run python -m hanabi_data check`) runs the rest.
 
 **Checks for every game record** (reject the game on any failure):
 - Every action is legal under §4 (the actor's turn, card in the actor's hand, clue to another seat,

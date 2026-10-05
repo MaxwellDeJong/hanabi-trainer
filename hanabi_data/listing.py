@@ -13,7 +13,7 @@ this one included (it is never below 1).
 
 Pages are saved by hand (one fetch per player, see docs/progress.md) and parsed offline:
 
-    python3 -m hanabi_data listing data/history/*.html --out data/history/listing.jsonl
+    uv run python -m hanabi_data listing data/history/*.html --out data/history/listing.jsonl
 """
 from __future__ import annotations
 
