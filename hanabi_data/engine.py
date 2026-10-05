@@ -327,7 +327,10 @@ class Engine:
         if self.rule_end is not None:
             if (cond, seat) != self.rule_end:
                 raise InvalidGame(f"end {cond} (seat {seat}); the rules say {self.rule_end}")
-        elif not (cond in End.EXTERNAL or (self.end_possible and cond == End.NORMAL)):
+        elif self.end_possible and cond == End.NORMAL:
+            # This view couldn't tell all remaining cards were dead; the server could, so the last action ended it.
+            self.actions[-1]["ended"] = True
+        elif cond not in End.EXTERNAL:
             raise InvalidGame(f"end condition {cond} on turn {self.turn + 1} is not explained by the rules")
         self.end = {"condition": cond, "seat": seat}
 
