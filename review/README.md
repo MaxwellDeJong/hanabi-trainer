@@ -8,7 +8,7 @@ bash review/run.sh          # first run also fetches hanab.live's source and ins
 ```
 
 `run.sh` rebuilds the bundles for `examples/export_*.json` and `data/exports/export_*.json`
-(fetched with `python3 -m hanabi_data.download`), builds the web app and starts the
+(fetched with `uv run python -m hanabi_data.download`), builds the web app and starts the
 server. Hover a card to highlight the clue log (white = touched, red = missed).
 
 **Sharing over a Cloudflare tunnel** (`share.sh`):

@@ -1,16 +1,16 @@
 """Command line.
 
-    python3 -m hanabi_data convert-export examples/export_78921.json > game.json
-    python3 -m hanabi_data convert-live capture.txt [--players a,b] [--options '{"variant": "6 Suits"}']
-    python3 -m hanabi_data decision examples/export_78921.json 4 --pretty   # UI turn 4
-    python3 -m hanabi_data decisions game.json > decisions.jsonl
-    python3 -m hanabi_data check game.json [...]
-    python3 -m hanabi_data check data/exports --listing data/history/listing.jsonl --summary   # pilot report
-    python3 -m hanabi_data filters data/exports/*.json [...]           # moves the filters catch
-    python3 -m hanabi_data trajectory examples/export_78921.json --seat 1 --turn 4   # printout
-    python3 -m hanabi_data trajectories data/exports/*.json --out data/trajectories/hanabi-trajectory-v0
-    python3 -m hanabi_data corpus data/exports --listing data/history/listing.jsonl --out data/corpus
-    python3 -m hanabi_data listing data/history/*.html --out data/history/listing.jsonl
+    uv run python -m hanabi_data convert-export examples/export_78921.json > game.json
+    uv run python -m hanabi_data convert-live capture.txt [--players a,b] [--options '{"variant": "6 Suits"}']
+    uv run python -m hanabi_data decision examples/export_78921.json 4 --pretty   # UI turn 4
+    uv run python -m hanabi_data decisions game.json > decisions.jsonl
+    uv run python -m hanabi_data check game.json [...]
+    uv run python -m hanabi_data check data/exports --listing data/history/listing.jsonl --summary   # pilot report
+    uv run python -m hanabi_data filters data/exports/*.json [...]           # moves the filters catch
+    uv run python -m hanabi_data trajectory examples/export_78921.json --seat 1 --turn 4   # printout
+    uv run python -m hanabi_data trajectories data/exports/*.json --out data/trajectories/hanabi-trajectory-v0
+    uv run python -m hanabi_data corpus data/exports --listing data/history/listing.jsonl --out data/corpus
+    uv run python -m hanabi_data listing data/history/*.html --out data/history/listing.jsonl
 
 Anything that takes a game accepts a GameRecord or a raw export, and `--listing FILE` (a listing .jsonl
 or a saved history page) to fill in each game's /history row.
@@ -34,7 +34,7 @@ from .rules import InvalidGame, Unsupported
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(prog="python3 -m hanabi_data", description=__doc__,
+    ap = argparse.ArgumentParser(prog="uv run python -m hanabi_data", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="command", required=True)
     games = argparse.ArgumentParser(add_help=False)

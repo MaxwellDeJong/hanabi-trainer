@@ -1,6 +1,6 @@
 """The training corpus: game files -> checked, split trajectory shards (docs/representation.md §8.5, §10).
 
-    python3 -m hanabi_data corpus data/exports --listing data/history/listing.jsonl --out data/corpus
+    uv run python -m hanabi_data corpus data/exports --listing data/history/listing.jsonl --out data/corpus
 
 Every game is checked (`check_record`, which compares it with its listing row too), searched by every
 label filter (any status, for exploring), and split by seed (`listing.split_of`). A game that passes
