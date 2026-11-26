@@ -1,6 +1,6 @@
 # Label filtering for the pretraining corpus
 
-*Status: in progress · last updated 2026-09-25*
+*Status: in progress · last updated 2026-10-06*
 
 This document tracks everything about filtering bad moves out of the training data: the approach,
 decisions made, proposals not yet decided, open questions and progress. The data format is in
@@ -35,6 +35,7 @@ pretraining corpus needs a way to drop **individual** obviously bad moves.
 | D5 | 2026-09-25 | **Clue ≠ play.** No filter may assume a clued card is meant to be played | A 1 clue can touch a card the cluer knows will bomb. A 1 clue after all 1s are played marks trash |
 | D6 | 2026-09-25 | **Weighting is decided at training time.** This repo only stores enough metadata (score, result, …) to derive a weight | Keeps policy out of the data pipeline |
 | D7 | 2026-09-23 | **Store the metadata now, filter later.** Filtering fields go in the decision record's `meta` (`representation.md` §7.3) | Any later filter can be applied without reprocessing the games |
+| D8 | 2026-10-06 | **Both first filters agreed:** `play_clued_5_no_4` and `discard_clued_5_live`. **Their catch rate is too low**, so more exploration is needed (§6.2); that work is outside the current scope | Every catch on the full corpus was looked at (§8, 2026-10-06): none is a good attempt to play. But they catch 576 moves, 483 of the 6,895 game-ending moves of `speedrun_fail` games |
 
 ---
 
@@ -44,8 +45,8 @@ Code: `hanabi_data/filters.py`. Tests: `tests/test_filters.py`.
 
 | Filter | Status | Catches |
 |---|---|---|
-| `play_clued_5_no_4` | candidate | A play of a card a **rank clue** called 5, while no suit the card's clues allow has its stack at 4 |
-| `discard_clued_5_live` | candidate | A discard of a card a rank clue called 5, while every suit its clues allow (excluding suits whose 5 is already played) can still reach 5. The max score is then certainly lost |
+| `play_clued_5_no_4` | agreed (D8) | A play of a card a **rank clue** called 5, while no suit the card's clues allow has its stack at 4 |
+| `discard_clued_5_live` | agreed (D8) | A discard of a card a rank clue called 5, while every suit its clues allow (excluding suits whose 5 is already played) can still reach 5. The max score is then certainly lost |
 
 Both use **clue knowledge only**: the card's positive and negative clues, the stacks and the discard
 pile. Card counting isn't used. The card must have had a positive "5" clue, so a card known to be a 5
@@ -144,6 +145,20 @@ Candidates for later filters, roughly from safest to riskiest. Each needs explor
 
 ---
 
+### 6.2 Raising the catch rate (sketch, outside the current scope)
+
+D8 agreed the first two filters knowing they catch little. These are starting points for later
+exploration, not decisions. `filters` runs over the whole corpus in about 23 s, so each idea can be
+measured before it's discussed.
+
+| # | Idea | What the full corpus says |
+|---|---|---|
+| C1 | **Measure W1–W4 on the corpus.** Same clue-knowledge level as now, more ranks and trash (§6.1) | Of the 585 game-ending misplays in `speedrun_fail` games that are `misplay_knowable`, `play_clued_5_no_4` catches 436. The other 149 are knowably unplayable but not clued 5s: the W2/W3 ground |
+| C2 | **Card counting (W5, W6)** for discards: a discarded card that every identity the actor can't rule out makes critical | Most of the 4,502 game-ending discards are of cards the actor knows little about (chop discards). Under D1 they stay unless counting proves them critical |
+| C3 | **An abandon flag, separate from the filters** (Q3): early game-ending moves with clues in hand and no strikes, both plays and discards | Half the catches are by turn 11, nearly all with 4+ clues and no strikes. `misplay_run_to_end` misses discards, which are most `speedrun_fail` endings |
+| C4 | **Use `speedrun` itself.** In a `speedrun` game every move with `lost_critical` ends the game; the training rule may matter more than any filter (D6) | 6,895 games end this way; `label_effect` already marks every one |
+| C5 | **Mid-game catches.** Only 1 catch (28089) isn't the game's last move | Mid-game mistakes are mostly convention mistakes (§4), which rules can't prove. Reviewed labels (P4) are the likelier route |
+
 ## 7. Open questions
 
 1. **Order of widening.** Which of W1–W6 comes next, once there's more data?
@@ -164,6 +179,43 @@ Candidates for later filters, roughly from safest to riskiest. Each needs explor
 ## 8. Progress log
 
 Newest first.
+
+### 2026-10-06 · Both candidates on the full corpus; agreed (D8)
+
+`filters` over the 13,836 corpus games (pass the files, not the directory; it stops at the first
+unsupported game, so take the `ok` paths from `data/corpus/games.jsonl`): 23 s.
+
+| Filter | Catches | In a final misplay run | The game's last move |
+|---|---|---|---|
+| `play_clued_5_no_4` | 527 | 526 | 526 (the other: 28089, below) |
+| `discard_clued_5_live` | 49 | 0 | **all 49** (47 `speedrun_fail`, 2 `all_or_nothing_fail`) |
+
+**Every catch but one ends the game.** The reason is `speedrun` (on in 13,464 games): the game ends
+as soon as the max score can't be reached (`engine.py:290`), so playing or discarding a clued 5 ends it on
+the spot. Half the catches come early (median turn 11 for both filters; 22 of the 49 discards by turn 10, nearly
+all with 4+ clues and no strikes). A known 5 thrown away that early is the group abandoning a deal, the discard-side version of a deliberate strikeout (§5.1). The one exception,
+28089 turn 14 (2022, no `speedrun`), plays a known G5 with no stack at 4; two moves later a player
+terminates the game. Also an abandon, done by hand.
+
+A few late catches could be genuine mistakes rather than abandons (55815 t55, 78003 t51, 75817 t41: late
+game, 0–3 clues). 78003 t51 has 0 clues and 2 strikes: the actor could only play or discard, and chose the
+known 5 over an unclued card. Either way each is provably bad under D1: it loses the max score.
+
+**How `speedrun_fail` games end** (6,895, half the corpus): 4,502 on a discard that lost a critical card,
+2,393 on a misplay (2,228 single, 165 the second of a run of two; 585 `misplay_knowable`). The filters catch
+483 of these last moves. `misplay_run_to_end` covers only the misplays, so **the 4,502 game-ending
+discards have no run flag**; `label_effect` (`lost_critical`, `ended_game`) marks all 6,895.
+
+So both filters are precise (no catch looks like a good attempt to play), but nearly everything they catch
+is already marked as the game's last move. What matters more is Q3: how training treats the game-ending
+move of a `speedrun_fail` game, deliberate or not.
+
+**Agreed (D8).** Both statuses are now `agreed` in `filters.py`, so the catches appear in `meta.filters`
+and in the trajectories' `filters` bitmask. Tests: `test_filters.py` checks that an agreed filter reaches
+`meta` and a candidate doesn't; `test_trajectory.py` checks the bitmask against `meta.filters` (it was
+always 0). `examples/decision_78921_turn4.json` is unchanged (nothing caught there). The corpus was rebuilt
+(6 min): the same games, trajectories and frames, with 527 + 49 bits set (0 before). The previous build is
+kept in `data/corpus.before-agreed/`. More exploration is needed to catch more (§6.2).
 
 ### 2026-09-25 · Tracking document
 
@@ -197,6 +249,8 @@ convention mistakes, which the reviewed labels have to handle.
 
 ### Next
 
-- Run the report on a larger download once bulk collection is permitted.
-- Decide whether to agree the two candidates.
+- ~~Run the report on a larger download.~~ Done 2026-10-06, on the full corpus.
+- Decide how training treats the game-ending move of a `speedrun_fail` game (Q3), incl. the 4,502 discards.
+- ~~Decide whether to agree the two candidates.~~ Agreed 2026-10-06 (D8).
+- Raise the catch rate (§6.2): outside the current scope.
 - Pick the next widening (Q1) and decide P1–P5.

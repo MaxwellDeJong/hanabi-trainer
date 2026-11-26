@@ -8,12 +8,13 @@ Older entries are kept as written. Where the code has since changed, the entry h
 
 ---
 
-## Current state (checked against the code 2026-10-04)
+## Current state (checked against the code 2026-10-06)
 
-`python3 -m pytest`: **219 passed** on the committed data, **714** with the 110 exports on `compute` (the
-trajectory tests run on every supported export there). On `compute`: 110 exports in `data/exports/` (the 10 hand-picked plus the
-100-game random pilot). `check` passes on 109; the other (23903) uses `detrimentalCharacters`, which we leave
-out. The 12 games from before (3 in `examples/`) all match hanab.live's reducer with 0 errors.
+`python3 -m pytest`: **219 passed** on the committed data; on `compute` the trajectory tests also run on every
+supported export, **69,339 passed** (2026-10-06 with the filters agreed, 46 min with `uv run pytest -n auto`). On `compute`: **all
+13,976 exports** in `data/exports/` (the full download finished 2026-10-05) and the corpus in `data/corpus/`.
+`check` passes on 13,836; the other 140 use `detrimentalCharacters`, which we leave out. The 12 games from
+before (3 in `examples/`) all match hanab.live's reducer with 0 errors.
 
 | Area | Where | State |
 |---|---|---|
@@ -21,9 +22,9 @@ out. The 12 games from before (3 in `examples/`) all match hanab.live's reducer 
 | **Listing and split** | `hanabi_data/listing.py`, `data/history/` | harikari.live's saved history page → `data/history/listing.jsonl` (25,412 rows; 13,975 in scope). `check` compares a game with its row. Train/valid/test split fixed by seed hash (`split_of`): 12,660 / 650 / 665 of the in-scope games. CLI: `listing` |
 | **Game engine** | `hanabi_data/engine.py`, `rules.py` | Replays and validates GameRecords, full information or one player's view; every rule-based ending incl. All or Nothing, strikeout, surrender. Frozen against the retired prototype's output by `tests/data/golden_decisions.jsonl` (`meta` not compared); checked against hanab.live's reducer by `review/oracle/` |
 | **Trajectories** | `hanabi_data/trajectory.py`, `decision.views()` | `hanabi-trajectory/v0` (`representation.md` §8): one per (game, viewer seat), integer-coded numpy frames and steps, `.npz` shards + `index.jsonl`, `encode_move`/`decode_move` for every move format, `render`. CLI: `trajectory`, `trajectories`. Prefix, view and round-trip tests pass on all 12 games and the live captures. No vocabulary yet (Q14). numpy needed only for this module |
-| **Corpus build** | `hanabi_data/corpus.py` | `corpus GAMES… --out DIR [--listing] [--jobs]`: every game checked, searched by the filters and split by seed; good games → shards in `train/`, `valid/`, `test/`; `games.jsonl` says why any file was left out; `report.txt`. Parallel and deterministic, no resume (rebuild instead). On the 12 games: 10 train, 2 valid, 0 test |
-| **Downloader** | `hanabi_data/download.py` | Polite: one request at a time, oldest first, ≤0.5 request/s, cached and resumable, stops at the first problem, logs to `download_log.jsonl`. One fixed User-Agent, as promised to the owner. Bulk mode: `--listing` targets (13,966 missing, ~8 h), a terms file required past 20 missing exports, UTC window, pilot runs (`--max-requests`, `--sample`). Logs enough to diagnose any stop: status, headers, timing, the failed reply kept in `failed/`, a `crash` record with traceback, SIGTERM/SIGHUP stops. `--skip FILE` leaves out games that fail every time, each with a reason. Used for the 10 games in `target_games.txt` and the **100-game pilot on 2026-10-04** (no errors, replies ≤0.35 s). **The owner agreed 2026-10-02** (`data/download_terms.json`, tracked); the full run hasn't started |
-| **Move filtering** | `hanabi_data/filters.py`, `docs/label-filtering.md` | Two `candidate` filters (`play_clued_5_no_4`, `discard_clued_5_live`) and the `filters` report. None `agreed` yet, so `meta.filters` is always `[]`. On the 12 games: one catch (78922 turn 10, looks deliberate) |
+| **Corpus build** | `hanabi_data/corpus.py` | `corpus GAMES… --out DIR [--listing] [--jobs]`: every game checked, searched by the filters and split by seed; good games → shards in `train/`, `valid/`, `test/`; `games.jsonl` says why any file was left out; `report.txt`. Parallel and deterministic, no resume (rebuild instead). **Built on `compute` 2026-10-06** in `data/corpus/` (36 MB), rebuilt the same day with the filters agreed: 13,836 games, 38,677 trajectories, 852,910 frames; train/valid/test 12,529 / 648 / 659 games; 140 left out (`unsupported`). The build before agreeing is in `data/corpus.before-agreed/` |
+| **Downloader** | `hanabi_data/download.py` | Polite: one request at a time, oldest first, ≤0.5 request/s, cached and resumable, stops at the first problem, logs to `download_log.jsonl`. One fixed User-Agent, as promised to the owner. Bulk mode: `--listing` targets (13,966 missing, ~8 h), a terms file required past 20 missing exports, UTC window, pilot runs (`--max-requests`, `--sample`). Logs enough to diagnose any stop: status, headers, timing, the failed reply kept in `failed/`, a `crash` record with traceback, SIGTERM/SIGHUP stops. `--skip FILE` leaves out games that fail every time, each with a reason. Used for the 10 games in `target_games.txt`, the **100-game pilot on 2026-10-04** and the **full run, 2026-10-04/05**: 13,866 games in 8.1 h, no errors or retries (2026-10-06 entry). **The owner agreed 2026-10-02** (`data/download_terms.json`, tracked). Nothing left to fetch |
+| **Move filtering** | `hanabi_data/filters.py`, `docs/label-filtering.md` | Two **agreed** filters (`play_clued_5_no_4`, `discard_clued_5_live`; D8, 2026-10-06), in `meta.filters` and the trajectories' `filters` bitmask, and the `filters` report. On the full corpus: 527 and 49 catches, all but one the game's last move. Catch rate too low; ideas sketched in `label-filtering.md` §6.2, outside the current scope |
 | **Review tool** | `review/` | **Inspect** (full bundle, any seat's view, checks, JSON; reached from the admin view) and **Label** (one seat per session, anonymised players, speedrun controls, moves apply at once, Tab hint, Backspace undo with replay, manual or auto-advance, the site's sounds, mismatch cue, Submit with fireworks). Several labelers: claims, board by game ID, 24-hour expiry, admin view. gzip for sharing through a tunnel. Label data in `review/labels/`: 5 submitted and 2 active sessions (test labelers), 76 labels |
 
 **Known gaps**
@@ -38,15 +39,71 @@ out. The 12 games from before (3 in `examples/`) all match hanab.live's reducer 
 - `review-tool.md` phase 5: card notes, empathy, prioritised sampling, hosting.
 
 **Next**
-- **Full download on `compute`** (the pilot passed, 2026-10-04 entries): check nobody is on the server, then
-  the full run (13,866 games, ~8.1 h) in tmux with its output saved, `check --summary`, and a `corpus` build
-  (needs numpy first). Command in the logging entry.
+- **Token vocabulary (Q14)**: the main step between the corpus and training.
 - The rest of **`while-waiting.md`** (open questions and code changes that need no more data).
-- Decide whether to agree the two candidate filters, and the next widening (`label-filtering.md` §7).
+- Later, outside the current scope: raise the filters' catch rate (`label-filtering.md` §6.2), and decide
+  how training treats game-ending moves (Q3); the final move matters more than either filter.
 - Share the review tool with a few labelers through a tunnel; decide on sign-in before hosting.
 - Capture another live game (All or Nothing, 3+ players, with an `init` message).
-- Install numpy on `compute` (only `trajectory.py` needs it; the review tool doesn't).
-- Later for trajectories: the token vocabulary (Q14) and the human-label file (`representation.md` §8.8).
+- Later for trajectories: the human-label file (`representation.md` §8.8).
+
+---
+
+## 2026-10-06 · Full download, report and corpus ✅
+
+**Download.** Run on `compute` in tmux after checking nobody was on new.playhanabi.com:
+2026-10-04 20:23:54 – 2026-10-05 04:30:15 UTC, **13,866 saved, no errors, no retries, no skips** (one
+`start` and one `done` in `download_log.jsonl`; `failed/` empty). Replies took 0.22 s on average, 0.28 s
+at the 99th percentile, 5.3 s at most. With the 110 from before: 13,976 exports (the 13,975 in-scope
+listing rows plus 78663, which has no row), 58 MB. The full test suite then passed on every export
+(69,339 tests, 2026-10-05).
+
+**Report** (`check data/exports --listing data/history/listing.jsonl --summary`):
+
+| | |
+|---|---|
+| Pass | **13,836 of 13,976**. All 140 failures are `Unsupported: options ['detrimentalCharacters']` (2022: 120, 2023: 20); left out, as decided after the pilot |
+| Variants | 6 Suits 11,406 · No Variant 2,570 |
+| Players | 2p 5,190 · 3p 6,654 · 4p 1,888 · 5p 244 |
+| Endings (passing games) | speedrun_fail 6,895 · terminated_by_player 3,092 · strikeout 3,062 · normal 494 · all_or_nothing_fail 250 · timeout 38 · idle_timeout 5; won 339 |
+| New since the pilot | `timeout` and `idle_timeout` endings (the engine's external endings, all pass); one timed game with `timeBase=10` (the rest 5) |
+| Options | speedrun 13,464 · allOrNothing 452 · timed 446 · detrimentalCharacters 140. "none at all 7" counts games with an empty options object; the per-year "no options" (55) ignores `variant`, so 48 games set only a variant |
+| Deck out | 454 games; play went on for more than a round in 3: 78742 (3 turns), 79006 and 78961 (7 each), all timed All or Nothing from 2026, all pass. **Answers RQ10** (`representation.md` Q10) |
+| By year | 2021–2026: 5 / 4,124 / 1,681 / 1,887 / 2,657 / 3,621. Problems only in 2022–2023 (the `detrimentalCharacters` games); timed All or Nothing only in 2026 |
+| No listing row | 78663 only (known) |
+
+**Corpus** (`uv run python -m hanabi_data corpus data/exports --listing data/history/listing.jsonl --out
+data/corpus`, exit code 1 because of the 140 left out, as expected):
+
+| Split | Games | Trajectories | Frames |
+|---|---|---|---|
+| train | 12,529 | 35,050 | 775,385 |
+| valid | 648 | 1,783 | 39,473 |
+| test | 659 | 1,844 | 38,052 |
+| **all** | **13,836** | **38,677** | **852,910** |
+
+294,602 moves, longest game 86. 36 MB. `games.jsonl`: 13,836 `ok`, 140 `unsupported`. Checked: the
+endings equal the report's; the player counts drop by exactly the 140 (all 6 Suits); trajectories are one
+per seat (2×5,167 + 3×6,577 + 4×1,848 + 5×244); the splits are the listing's 12,660 / 650 / 665 less the
+games left out, plus 78663.
+
+**Filter catches** (candidates, so none in `meta.filters`):
+
+| Filter | Catches | In a final misplay run |
+|---|---|---|
+| `play_clued_5_no_4` | 527 moves in 527 games | 526 |
+| `discard_clued_5_live` | 49 moves in 49 games | 0 |
+
+All but one catch is the game's last move: under `speedrun` a game ends as soon as the max score is lost,
+so a clued 5 played or discarded ends it, mostly as a deliberate abandon. Details in `label-filtering.md`
+§8 (2026-10-06).
+
+**Both filters agreed** (`label-filtering.md` D8): no catch is a good attempt to play, but the catch rate is
+low and needs more exploration later (§6.2, outside the current scope). `filters.py` statuses changed;
+`test_filters.py` and `test_trajectory.py` updated (the bitmask is now checked against `meta.filters`).
+The corpus was rebuilt into `data/corpus/` (6 min, the same games and counts, 527 + 49 filter bits set);
+the earlier build is in `data/corpus.before-agreed/`. The `filters` command takes files, not a directory,
+and stops at the first unsupported game.
 
 ---
 

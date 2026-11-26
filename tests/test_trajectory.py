@@ -13,6 +13,7 @@ import pytest
 from hanabi_data import from_export, from_live, parse_capture
 from hanabi_data.decision import views
 from hanabi_data.engine import ACTIONS
+from hanabi_data.filters import FILTERS
 from hanabi_data.record import load_game, player_view
 from hanabi_data.rules import COPIES, SUIT_LETTERS, Unsupported
 from hanabi_data.trajectory import (CRITICAL, FRAME_FIELDS, MAX_SEATS, MAX_SLOTS, MISPLAY_RUN_TO_END, NONE,
@@ -150,7 +151,7 @@ def test_round_trip_against_decision_records(gid):
                 bits = {"misplay": 1, "lost_critical": 2, "ended_game": 4}
                 assert tr.steps["effect"][t] == sum(bits[e] for e in m["label_effect"]) \
                     + MISPLAY_RUN_TO_END * bool(m["misplay_run_to_end"])
-                assert tr.steps["filters"][t] == 0  # no filter is agreed yet
+                assert tr.steps["filters"][t] == sum(1 << i for i, f in enumerate(FILTERS) if f.name in m["filters"])
 
 
 def dead(ident, board, obs):
