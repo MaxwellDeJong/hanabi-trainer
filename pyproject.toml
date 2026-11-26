@@ -12,6 +12,10 @@ dev = [
     "pytest-xdist>=3",
     "websocket-client>=1.6",  # .claude/skills/review-ui-check/scripts/cdp.py
 ]
+viz = [
+    "matplotlib>=3.9.4",
+    "pillow>=10.1",
+]
 
 [build-system]
 requires = ["uv_build>=0.8,<0.13"]

@@ -94,8 +94,8 @@ A few replay page views in a browser, not a download.
 
 ### Not answerable yet (for reference)
 
-These wait for the pilot run or the full download: **RQ10** (server version, especially games past the end
-of the deck), agreeing the two candidate filters, **LF Q1** (order of widening), **P4** (filters vs
+These wait for the pilot run or the full download: ~~**RQ10**~~ (server version; answered 2026-10-06 from
+the full download), agreeing the two candidate filters, **LF Q1** (order of widening), **P4** (filters vs
 reviewed labels, which also needs reviewed games with catches), and **RQ14** (vocabulary, which waits for
 the first model).
 

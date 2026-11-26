@@ -56,10 +56,10 @@ def _discard_clued_5_live(engine: Engine, action: dict) -> bool:
 
 
 FILTERS = (
-    Filter("play_clued_5_no_4", CANDIDATE,
+    Filter("play_clued_5_no_4", AGREED,
            "Plays a card a rank clue called 5 while no suit it could be has its stack at 4.",
            _play_clued_5_no_4),
-    Filter("discard_clued_5_live", CANDIDATE,
+    Filter("discard_clued_5_live", AGREED,
            "Discards a card a rank clue called 5 while every suit it could be can still reach 5, "
            "so the max score is certainly lost.",
            _discard_clued_5_live),

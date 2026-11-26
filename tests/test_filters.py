@@ -8,7 +8,7 @@ from hanabi_data import decisions, from_export
 from hanabi_data import filters
 from hanabi_data.decision import summarize
 from hanabi_data.engine import positions
-from hanabi_data.filters import AGREED, fired, firings
+from hanabi_data.filters import AGREED, CANDIDATE, fired, firings
 from helpers import color_clue, discard, make_export, play, rank_clue, sorted_deck
 
 HANDS = ["R5", "Y5", "G1", "B1", "P1", "R1", "R2", "R3", "R4", "R4"]
@@ -78,10 +78,11 @@ def test_discard_clued_5_known_to_be_in_a_live_suit():
 def test_meta_lists_agreed_filters_only(monkeypatch):
     record = game(FIVES_CLUED + [play(R5)])
     # The fourth record is the position after the play: no label, so no filters.
-    assert [d["meta"]["filters"] for d in decisions(record)] == [[], [], [], None]
     name = "play_clued_5_no_4"
-    monkeypatch.setitem(filters.BY_NAME, name, dataclasses.replace(filters.BY_NAME[name], status=AGREED))
+    assert filters.BY_NAME[name].status == AGREED
     assert [d["meta"]["filters"] for d in decisions(record)] == [[], [], [name], None]
+    monkeypatch.setitem(filters.BY_NAME, name, dataclasses.replace(filters.BY_NAME[name], status=CANDIDATE))
+    assert [d["meta"]["filters"] for d in decisions(record)] == [[], [], [], None]
 
 
 def test_firings_report():

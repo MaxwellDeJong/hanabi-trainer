@@ -1005,6 +1005,11 @@ deliberate strikeouts (its §5.1), proposals, open questions and progress.
     The engine now implements §4 and agrees with the `c1d970b` reducer on every position of the three
     examples and five longer synthetic games (§10). What's still missing is a sample of real games,
     especially ones that run past the end of the deck.
+    *Answered 2026-10-06:* yes. All 13,976 downloaded games were replayed by `check` against their
+    history-page rows; 13,836 pass, and the other 140 use `detrimentalCharacters`, which we leave out
+    (§4). The deck ran out in 454 games; in 3 play went on for more than a round after it (78742, 79006,
+    78961: 3, 7 and 7 turns), all three timed All or Nothing games from 2026, and all three pass.
+    `progress.md` 2026-10-06.
 11. **The live client.** Would the bot play from its own account or a player's? It needs a logged-in
     websocket connection either way. Are the server admins and the group OK with a bot connecting? Should
     it send moves over the websocket, or click in the browser?
