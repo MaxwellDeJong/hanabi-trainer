@@ -680,8 +680,9 @@ model output ──► decode_move ──► a move in `legal` format (for the l
 | CLI | `trajectory GAME --seat S [--turn N]` prints frames; `trajectories GAMES… --out DIR` writes shards (every seat of a full record; a game that fails to convert is reported and skipped) |
 
 **First implementation (done 2026-09-30):** the pieces above, the §8.7 tests, and the CLI commands.
-**Later:** the token vocabulary (Q14), and a human-label file built with `encode_move`, keyed by
-(`game_id`, `viewer`, step) with `also_ok` stored as masks in the legal shape.
+**Later:** the token vocabulary (Q14). *The human-label file was built 2026-11-25*
+(`hanabi_data/human_labels.py`): keyed by (`game_id`, `viewer`, `step`), the choice as step fields and the
+choice plus `also_ok` as masks in the legal shape (`labels.npz`), with per-label facts in `labels.jsonl`.
 
 Building every frame through a full DecisionRecord repeats the history list at each position, so it's
 O(T²) per trajectory. With T below about 100 that's fine: trajectories are built once and cached (§8.5).

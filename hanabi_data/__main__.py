@@ -11,6 +11,8 @@
     uv run python -m hanabi_data trajectories data/exports/*.json --out data/trajectories/hanabi-trajectory-v0
     uv run python -m hanabi_data corpus data/exports --listing data/history/listing.jsonl --out data/corpus
     uv run python -m hanabi_data listing data/history/*.html --out data/history/listing.jsonl
+    uv run python -m hanabi_data labels review/labels --out data/human_labels   # human-label file (B8)
+    uv run python -m hanabi_data agreement review/labels                      # labels vs recorded moves
 
 Anything that takes a game accepts a GameRecord or a raw export, and `--listing FILE` (a listing .jsonl
 or a saved history page) to fill in each game's /history row.
@@ -76,6 +78,19 @@ def main(argv=None) -> int:
     p = sub.add_parser("listing", help="saved /history pages -> listing rows, and a summary")
     p.add_argument("pages", type=Path, nargs="+", help="saved history pages (.html)")
     p.add_argument("--out", type=Path, help="write the merged rows here (.jsonl)")
+    for name, help_ in (("labels", "review-tool labels -> the human-label file (labels.npz + labels.jsonl)"),
+                        ("agreement", "how often labels agree with the recorded moves, by player and bucket")):
+        p = sub.add_parser(name, help=help_)
+        p.add_argument("label_dir", type=Path, help="the review tool's label directory (review/labels)")
+        p.add_argument("--exports", type=Path, nargs="+", default=[Path("data/exports"), Path("examples")],
+                       help="where to find export_<id>.json (default: data/exports, examples)")
+        p.add_argument("--submitted-only", action="store_true", help="only labels from submitted sessions")
+        p.add_argument("--labeller", action="append", help="only these labelers (repeatable)")
+        if name == "labels":
+            p.add_argument("--out", type=Path, required=True, help="output directory")
+        else:
+            p.add_argument("--level", choices=("exact", "touch", "type"), default="exact",
+                           help="agreement level for the per-group tables (default: exact)")
     args = ap.parse_args(argv)
 
     try:
@@ -129,9 +144,26 @@ def main(argv=None) -> int:
             return 1 if failed else 0
         elif args.command == "filters":
             report_filters(args.games, load)
+        elif args.command in ("labels", "agreement"):
+            return human_labels_command(args)
     except (InvalidGame, Unsupported, ValueError, FileExistsError) as e:
         print(f"error: {type(e).__name__}: {e}", file=sys.stderr)
         return 2
+    return 0
+
+
+def human_labels_command(args) -> int:
+    from .human_labels import agreement_report, collect, write_label_file  # numpy is needed only here
+    rows, problems = collect(args.label_dir, args.exports, args.submitted_only)
+    if args.labeller:
+        rows = [r for r in rows if r["labeller"] in args.labeller]
+    for p in problems:
+        print(f"skipped: {p}", file=sys.stderr)
+    if args.command == "labels":
+        write_label_file(rows, args.out)
+        print(f"{len(rows)} labels -> {args.out}")
+    else:
+        print("\n".join(agreement_report(rows, args.level)))
     return 0
 
 

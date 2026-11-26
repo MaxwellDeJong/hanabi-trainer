@@ -9,7 +9,8 @@ bash review/run.sh          # first run also fetches hanab.live's source and ins
 
 `run.sh` rebuilds the bundles for `examples/export_*.json` and `data/exports/export_*.json`
 (fetched with `uv run python -m hanabi_data.download`), builds the web app and starts the
-server. Hover a card to highlight the clue log (white = touched, red = missed).
+server. If `review/pool.txt` exists (one game ID per line, `#` comments), only those games are
+bundled: with the full download, bundling every export would take ~14 GB. Hover a card to highlight the clue log (white = touched, red = missed).
 
 **Sharing over a Cloudflare tunnel** (`share.sh`):
 
