@@ -117,7 +117,8 @@ Roughly in order of value. Items marked *after …* wait on a decision from §1.
 - [ ] **B3 · Review tool at 14k games.** `review/run.sh` rebuilds a bundle for every export, through the
   Node oracle, on every start, and the board lists every game. With the full download that's about 14k
   bundles of 1–2 MB each (the 12 on hand reach 1.8 MB), so roughly 14 GB. Build bundles only for a labeling pool (after the "labeling pool"
-  decision), cache them, and skip unchanged ones.
+  decision), cache them, and skip unchanged ones. *2026-11-25:* `review/pool.txt` limits the bundles to a
+  listed pool (72 games); caching and skipping unchanged bundles is still open.
 - [ ] **B4 · Synthetic games at scale.** The random full-information search that found
   `tests/data/synthetic_*.json` lives only in the tests. As a generator it could make a few thousand legal
   games to time B1 and to compare the engine with the oracle far beyond 12 games.
@@ -129,9 +130,10 @@ Roughly in order of value. Items marked *after …* wait on a decision from §1.
   games and the synthetic ones.
 - [ ] **B7 · `hanabi-decision/v1`** (*after RQ13*): `trash` covers dead cards. Regenerate
   `tests/data/golden_decisions.jsonl` and review the diff.
-- [ ] **B8 · Human-label file** (`representation.md` §8.8 "later"): turn `review/labels/` events into
+- [x] **B8 · Human-label file** (`representation.md` §8.8 "later"): turn `review/labels/` events into
   step-shaped fields with `encode_move`, keyed by (`game_id`, viewer, step), `also_ok` as masks. The 76
-  existing labels are enough to build and test it.
+  existing labels are enough to build and test it. *Done 2026-11-25:* `hanabi_data/human_labels.py`, with
+  the `agreement` report (`progress.md`).
 - [ ] **B9 · Suit permutation** (*after RQ7*): one function applying a suit permutation to a trajectory
   (`suit`, `know_suits` bits, per-suit arrays, clue values), with a test that a permuted game still
   replays.

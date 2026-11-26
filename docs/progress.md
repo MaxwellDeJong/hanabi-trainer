@@ -8,10 +8,10 @@ Older entries are kept as written. Where the code has since changed, the entry h
 
 ---
 
-## Current state (checked against the code 2026-10-06)
+## Current state (checked against the code 2026-11-25)
 
 `python3 -m pytest`: **219 passed** on the committed data; on `compute` the trajectory tests also run on every
-supported export, **69,339 passed** (2026-10-06 with the filters agreed, 46 min with `uv run pytest -n auto`). On `compute`: **all
+supported export, **69,350 passed** (2026-11-25, 48 min with `uv run pytest -n auto`). On `compute`: **all
 13,976 exports** in `data/exports/` (the full download finished 2026-10-05) and the corpus in `data/corpus/`.
 `check` passes on 13,836; the other 140 use `detrimentalCharacters`, which we leave out. The 12 games from
 before (3 in `examples/`) all match hanab.live's reducer with 0 errors.
@@ -25,7 +25,8 @@ before (3 in `examples/`) all match hanab.live's reducer with 0 errors.
 | **Corpus build** | `hanabi_data/corpus.py` | `corpus GAMES… --out DIR [--listing] [--jobs]`: every game checked, searched by the filters and split by seed; good games → shards in `train/`, `valid/`, `test/`; `games.jsonl` says why any file was left out; `report.txt`. Parallel and deterministic, no resume (rebuild instead). **Built on `compute` 2026-10-06** in `data/corpus/` (36 MB), rebuilt the same day with the filters agreed: 13,836 games, 38,677 trajectories, 852,910 frames; train/valid/test 12,529 / 648 / 659 games; 140 left out (`unsupported`). The build before agreeing is in `data/corpus.before-agreed/` |
 | **Downloader** | `hanabi_data/download.py` | Polite: one request at a time, oldest first, ≤0.5 request/s, cached and resumable, stops at the first problem, logs to `download_log.jsonl`. One fixed User-Agent, as promised to the owner. Bulk mode: `--listing` targets (13,966 missing, ~8 h), a terms file required past 20 missing exports, UTC window, pilot runs (`--max-requests`, `--sample`). Logs enough to diagnose any stop: status, headers, timing, the failed reply kept in `failed/`, a `crash` record with traceback, SIGTERM/SIGHUP stops. `--skip FILE` leaves out games that fail every time, each with a reason. Used for the 10 games in `target_games.txt`, the **100-game pilot on 2026-10-04** and the **full run, 2026-10-04/05**: 13,866 games in 8.1 h, no errors or retries (2026-10-06 entry). **The owner agreed 2026-10-02** (`data/download_terms.json`, tracked). Nothing left to fetch |
 | **Move filtering** | `hanabi_data/filters.py`, `docs/label-filtering.md` | Two **agreed** filters (`play_clued_5_no_4`, `discard_clued_5_live`; D8, 2026-10-06), in `meta.filters` and the trajectories' `filters` bitmask, and the `filters` report. On the full corpus: 527 and 49 catches, all but one the game's last move. Catch rate too low; ideas sketched in `label-filtering.md` §6.2, outside the current scope |
-| **Review tool** | `review/` | **Inspect** (full bundle, any seat's view, checks, JSON; reached from the admin view) and **Label** (one seat per session, anonymised players, speedrun controls, moves apply at once, Tab hint, Backspace undo with replay, manual or auto-advance, the site's sounds, mismatch cue, Submit with fireworks). Several labelers: claims, board by game ID, 24-hour expiry, admin view. gzip for sharing through a tunnel. Label data in `review/labels/`: 5 submitted and 2 active sessions (test labelers), 76 labels |
+| **Review tool** | `review/` | **Inspect** (full bundle, any seat's view, checks, JSON; reached from the admin view) and **Label** (one seat per session, anonymised players, speedrun controls, moves apply at once, Tab hint, Backspace undo with replay, manual or auto-advance, the site's sounds, mismatch cue, Submit with fireworks). Several labelers: claims, board by game ID, 24-hour expiry, admin view. gzip for sharing through a tunnel. Label data in `review/labels/` (2026-11-26): 34 submitted sessions, 465 labels in force over 32 games (hari 350, tester1 75, cf_tester 40). `review/pool.txt` limits the bundles to a 72-game labeling pool |
+| **Human labels** | `hanabi_data/human_labels.py` | Labels in force → rows keyed by (`game_id`, `viewer`, `step`): `labels.npz` (choice as step fields, choice + `also_ok` as legal-shape masks) + `labels.jsonl`. `agreement` report: exact / touch / type agreement with the recorded move, kappa over move types, per player and labeler with game-clustered intervals and empirical-Bayes shrinkage, and by `meta` bucket. CLI: `labels`, `agreement` |
 
 **Known gaps**
 - No sign-in: the labeler name is typed, and `#/admin` and Inspect are open to anyone who can reach the server.
@@ -45,7 +46,41 @@ before (3 in `examples/`) all match hanab.live's reducer with 0 errors.
   how training treats game-ending moves (Q3); the final move matters more than either filter.
 - Share the review tool with a few labelers through a tunnel; decide on sign-in before hosting.
 - Capture another live game (All or Nothing, 3+ players, with an `init` message).
-- Later for trajectories: the human-label file (`representation.md` §8.8).
+- ~~Later for trajectories: the human-label file (`representation.md` §8.8).~~ Done 2026-11-25.
+- More labels from a single labeler across many games and players, then re-read the agreement report.
+
+---
+
+## 2026-11-25 · Human-label file (B8), agreement report, labeling pool ✅
+
+**Human-label file** (`hanabi_data/human_labels.py`, `while-waiting.md` B8, `representation.md` §8.8). The
+label in force at each (session, turn), the same rule as the review server, becomes one row keyed like a
+trajectory step: (`game_id`, `viewer` = the labeled seat, `step` = UI turn − 1). `labels.npz` holds the choice
+as step fields (`type`, `slot`, `target`, `value`) and the choice plus `also_ok` as masks in the legal shape
+(`ok_play`, `ok_discard`, `ok_clue`). `labels.jsonl` holds the per-label facts (player, labeler, session,
+`chosen_by`, `submitted`, `hint_used`, `after_reveal`, `ms_to_choice`, the raw choice). A label whose seat
+isn't the actor, or whose move isn't legal, is refused. CLI:
+`uv run python -m hanabi_data labels review/labels --out DIR [--submitted-only] [--labeller NAME]`.
+
+**Agreement report**: `uv run python -m hanabi_data agreement review/labels [--level exact|touch|type]`.
+Each label is compared with the recorded move at three levels: *exact* (the same move, or one marked
+`also_ok`), *touch* (also a clue to the same player touching the same cards) and *type*. It reports Cohen's
+kappa over move types, a confusion table of move types, per player / labeler / labeler × player rates with a
+95% bootstrap interval over games (from 5 games) and an empirical-Bayes (beta-binomial) shrunk rate, and
+agreement by `meta` bucket (won/lost, moves from the end, `label_effect`, filters, recorded move type).
+Tests: `tests/test_human_labels.py` (rows line up with trajectory steps and legal masks; `also_ok`; touch
+level; retract/replace; refusals; file round trip; kappa, shrinkage, interval).
+
+**On the 218 labels in force** (3 test labelers, 11 games, 13 seats, mostly picked games): exact 66%,
+touch 66%, type 77%, kappa over types 0.67. The biggest confusion: labelers clue where the recorded move
+discards (11 colour clues vs recorded discards). Shrinkage pulls every player to the pooled 66%: the
+differences between players are within chance. cf_tester agrees 88% with harikari.live's seat where tester1
+agrees 62%, so the labeler matters as much as the player. 181 of the 218 come from won games. Not enough for
+conclusions; the pipeline is ready for more labels.
+
+**Labeling pool** (`review/pool.txt`, a first step for B3). With it, `review/run.sh` bundles only the listed
+games instead of every export. The pool: the 12 games labeled before, plus 60 random corpus games with ≥ 15
+turns (seed 20261125; 53 train, 5 valid, 2 test). 72 bundles, all checks passed.
 
 ---
 
